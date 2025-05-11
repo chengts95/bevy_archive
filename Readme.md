@@ -83,7 +83,6 @@ fn main() {
     // Load into new world
     let loaded = AuroraWorldManifest::from_file("my_world.toml", None).unwrap();
     let mut new_world = World::new();
-    registry.register::<Health>();
     load_world_manifest(&mut new_world, &loaded, &registry).unwrap();
 }
 ```
