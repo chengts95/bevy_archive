@@ -4,7 +4,7 @@ use bevy_ecs::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::bevy_registry::SnapshotRegistry;
 
@@ -19,12 +19,12 @@ pub enum StorageTypeFlag {
     SparseSet,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct ArchetypeSnapshot {
     pub component_types: Vec<String>,         // 顺序确定！
     pub storage_types: Vec<StorageTypeFlag>,  // 与 component_types 对齐
     pub columns: Vec<Vec<serde_json::Value>>, // 每列为一个组件的全部值
-    pub entities: BTreeMap<u32, usize>,       // entity_id → row idx
+    pub entities: Vec<u32>,                   // entity_id → row idx
 }
 impl ArchetypeSnapshot {
     pub fn is_empty(&self) -> bool {
@@ -40,11 +40,12 @@ impl ArchetypeSnapshot {
     pub fn has_component(&self, type_name: &str) -> bool {
         self.get_column_index(type_name).is_some()
     }
-    pub fn get_entity(&self, row: u32) -> Vec<(&str, &Value)> {
-        self.get_row(self.entities[&row])
+    pub fn get_entity(&self, entity: u32) -> Option<Vec<(&str, &Value)>> {
+        let row = self.entities.iter().position(|x| x == &entity)?;
+        Some(self.get_row(row))
     }
     pub fn get_mut(&mut self, entity_id: u32, type_name: &str) -> Option<&mut Value> {
-        let row = *self.entities.get(&entity_id)?;
+        let row = self.entities.iter().position(|x| x == &entity_id)?;
         let col = self.component_types.iter().position(|t| t == type_name)?;
         Some(&mut self.columns[col][row])
     }
@@ -63,8 +64,8 @@ impl ArchetypeSnapshot {
         self.get_column_index(type_name)
             .map(|idx| &mut self.columns[idx])
     }
-    pub fn entities(&self) -> Vec<u32> {
-        self.entities.keys().copied().collect()
+    pub fn entities(&self) -> &Vec<u32> {
+        &self.entities
     }
     pub fn insert_component(
         &mut self,
@@ -120,10 +121,20 @@ impl ArchetypeSnapshot {
         Ok(())
     }
 }
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorldArchSnapshot {
     pub entities: Vec<u32>,
     pub archetypes: Vec<ArchetypeSnapshot>,
+}
+impl WorldArchSnapshot {
+    pub fn purge_null(&mut self) {
+        self.entities.clear();
+        self.archetypes.iter().for_each(|x| {
+            self.entities.extend_from_slice(x.entities.as_slice());
+        });
+        //we may want to deduplicate entities here
+        self.entities.sort_unstable();
+    }
 }
 pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldArchSnapshot {
     let mut world_snapshot = WorldArchSnapshot::default();
@@ -144,18 +155,13 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
             return ArchetypeSnapshot::default();
         }
         let mut archetype_snapshot = ArchetypeSnapshot::default();
-        archetype_snapshot.entities.extend(
-            archetype
-                .entities()
-                .iter()
-                .enumerate()
-                .map(|(idx, x)| (x.id().index(), idx)),
-        );
-        let iter: Vec<_> = archetype_snapshot
-            .entities
+        let entities: Vec<_> = archetype
+            .entities()
             .iter()
-            .map(|(x, y)| (*x, *y))
+            .map(|x| (x.id().index()))
             .collect();
+        archetype_snapshot.entities.extend(entities.as_slice());
+        let iter = entities;
         archetype.components().for_each(|x| {
             if reg_comp_ids.contains_key(&x) {
                 let type_name = reg_comp_ids[&x];
@@ -166,8 +172,9 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                 let f = reg.exporters.get(type_name).unwrap();
                 archetype_snapshot.add_type(type_name, t);
                 let col = archetype_snapshot.get_column_mut(type_name).unwrap();
-                for &(entity, idx) in iter.iter() {
-                    let serialized = f(world, Entity::from_raw(entity)).unwrap();
+                for (idx, &entity) in iter.iter().enumerate() {
+                    let entity = world.entities().resolve_from_id(entity).unwrap();
+                    let serialized = f(world, entity).unwrap();
                     col[idx] = serialized;
                 }
             }
@@ -258,8 +265,7 @@ fn convert_to_archetype_snapshot(entities: &[EntitySnapshot]) -> Vec<ArchetypeSn
         });
 
         // 当前实体在哪一行？
-        let row = snapshot.entities.len();
-        snapshot.entities.insert(ent.id as u32, row);
+        snapshot.entities.push(ent.id as u32);
 
         // 将组件数据填入对应列
         for (type_name, column) in snapshot
@@ -283,7 +289,7 @@ fn convert_to_entity_snapshot(archs: &[ArchetypeSnapshot]) -> Vec<EntitySnapshot
     let mut entities = Vec::new();
 
     for arch in archs {
-        for (&entity_id, &row_idx) in &arch.entities {
+        for (row_idx, &entity_id) in arch.entities.iter().enumerate() {
             let mut components = Vec::new();
 
             for (col_idx, type_name) in arch.component_types.iter().enumerate() {

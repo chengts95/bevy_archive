@@ -11,7 +11,7 @@ pub mod prelude {
     pub use crate::aurora_archive::*;
     pub use crate::bevy_registry::*;
     #[cfg(feature = "flecs")]
-    pub use crate::flecs_registry as flecs_registry;
+    pub use crate::flecs_registry;
 
     pub use crate::entity_archive::*;
 }

@@ -223,7 +223,7 @@ impl From<&WorldWithAurora> for WorldArchSnapshot {
                 AuroraInternalFormat::ArchetypeSnapshot(data) => data,
             };
 
-            all_entities.extend(snapshot.entities.keys().copied());
+            all_entities.extend(snapshot.entities.clone());
             archetypes.push(snapshot);
         }
 

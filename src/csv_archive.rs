@@ -1,7 +1,6 @@
 use csv::Reader;
 use csv::Writer;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{Read, Result as IoResult, Write};
@@ -292,12 +291,7 @@ fn to_archetype_snapshot(csv: &ColumnarCsv) -> ArchetypeSnapshot {
     let mut component_types = Vec::new();
     let mut storage_types = Vec::new();
     let mut columns = Vec::new();
-    let entities = csv
-        .row_index
-        .iter()
-        .enumerate()
-        .map(|(i, &id)| (id, i))
-        .collect::<BTreeMap<_, _>>();
+    let entities = csv.row_index.clone();
 
     for (comp, fields) in component_fields {
         let mut component_column = Vec::new();
