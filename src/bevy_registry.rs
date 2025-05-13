@@ -8,8 +8,11 @@ use std::ptr::NonNull;
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
 pub type CompIdFn = fn(&World) -> Option<ComponentId>;
-pub type DynBuilderFn =
-    fn(&serde_json::Value, &mut World) -> Result<(ComponentId, OwningPtr<'static>), String>;
+pub type DynBuilderFn = for<'a> fn(
+    &serde_json::Value,
+    &mut World,
+    &'a bumpalo::Bump,
+) -> Result<(ComponentId, OwningPtr<'a>), String>;
 pub enum SnapshotMode {
     /// 完整序列化、反序列化（默认）
     Full,
@@ -88,9 +91,10 @@ impl SnapshotRegistry {
             world.entity_mut(entity).insert(val);
             Ok(())
         });
-        self.dyn_ctors.insert(name, |val, world| {
+        self.dyn_ctors.insert(name, |val, world, bump| {
             let id = world.register_component::<T>();
             //   let components = world.components();
+
             // SAFETY: This component exists because it is present on the archetype.
             let component: T = serde_json::from_value(val.clone()).map_err(|e| {
                 format!(
@@ -99,11 +103,9 @@ impl SnapshotRegistry {
                     e
                 )
             })?;
-            let boxed = Box::new(component);
-            // SAFETY: boxed is properly aligned and has the right layout
-            let ptr =
-                unsafe { OwningPtr::new(NonNull::new_unchecked(Box::into_raw(boxed).cast())) };
-
+            // SAFETY: bump alloc is properly aligned and has the right layout
+            let ptr = bump.alloc(component) as *mut T;
+            let ptr = unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) };
             Ok((id, ptr))
         });
     }

@@ -247,13 +247,13 @@ pub fn load_world_arch_snapshot2(
             .iter()
             .map(|x| reg.dyn_ctors.get(x.as_str()).unwrap())
             .collect();
-
+        let mut bump = bumpalo::Bump::new();
         for (row, entity) in entities.iter().enumerate() {
             let mut iter_components = vec![];
             let mut insert_ids = vec![];
             for (col_idx, type_name) in arch.component_types.iter().enumerate() {
                 let col = arch.get_column(&type_name).unwrap();
-                let (id, comp_ptr) = builders[col_idx](&col[row], world).unwrap();
+                let (id, comp_ptr) = builders[col_idx](&col[row], world,& bump).unwrap();
                 iter_components.push(comp_ptr);
                 insert_ids.push(id);
             }
@@ -263,6 +263,7 @@ pub fn load_world_arch_snapshot2(
                     .entity_mut(current_entity)
                     .insert_by_ids(&insert_ids, iter_components.drain(..))
             };
+            bump.reset();
         }
     }
 }
