@@ -193,6 +193,7 @@ pub fn load_world_manifest(
 }
 fn test_roundtrip_with_children() {
     let mut world = World::new();
+
     let registry = setup_registry();
 
     let _boss_id = build_sample_world(&mut world);

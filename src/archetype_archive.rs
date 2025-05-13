@@ -1,10 +1,11 @@
 use bevy_ecs::{
+    bundle,
     component::{ComponentId, StorageType},
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use crate::bevy_registry::SnapshotRegistry;
 
@@ -230,6 +231,42 @@ pub fn load_world_arch_snapshot(
     }
 }
 
+pub fn load_world_arch_snapshot2(
+    world: &mut World,
+    snapshot: &WorldArchSnapshot,
+    reg: &SnapshotRegistry,
+) {
+    world.entities().reserve_entities(count_entities(snapshot));
+    world.flush();
+
+    for arch in &snapshot.archetypes {
+        let entities = arch.entities();
+
+        let builders: Vec<_> = arch
+            .component_types
+            .iter()
+            .map(|x| reg.dyn_ctors.get(x.as_str()).unwrap())
+            .collect();
+
+        for (row, entity) in entities.iter().enumerate() {
+            let mut iter_components = vec![];
+            let mut insert_ids = vec![];
+            for (col_idx, type_name) in arch.component_types.iter().enumerate() {
+                let col = arch.get_column(&type_name).unwrap();
+                let (id, comp_ptr) = builders[col_idx](&col[row], world).unwrap();
+                iter_components.push(comp_ptr);
+                insert_ids.push(id);
+            }
+            let current_entity = world.entities().resolve_from_id(*entity).unwrap();
+            unsafe {
+                world
+                    .entity_mut(current_entity)
+                    .insert_by_ids(&insert_ids, iter_components.drain(..))
+            };
+        }
+    }
+}
+
 impl From<&WorldArchSnapshot> for archive::WorldSnapshot {
     fn from(snapshot: &WorldArchSnapshot) -> Self {
         let entities = convert_to_entity_snapshot(&snapshot.archetypes);
@@ -429,7 +466,7 @@ mod tests {
 
         // 第三步：构建空世界并加载
         let mut world_new = World::new();
-        load_world_arch_snapshot(&mut world_new, &snapshot_1, &registry);
+        load_world_arch_snapshot2(&mut world_new, &snapshot_1, &registry);
 
         // 第四步：再次保存快照
         let snapshot_2 = save_world_arch_snapshot(&world_new, &registry);

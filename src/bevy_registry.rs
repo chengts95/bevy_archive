@@ -1,10 +1,15 @@
+use bevy_ecs::component::{self, Components};
+use bevy_ecs::ptr::{Aligned, OwningPtr, PtrMut};
 use bevy_ecs::{component::ComponentId, prelude::*};
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::ptr::NonNull;
+
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
 pub type CompIdFn = fn(&World) -> Option<ComponentId>;
-
+pub type DynBuilderFn =
+    fn(&serde_json::Value, &mut World) -> Result<(ComponentId, OwningPtr<'static>), String>;
 pub enum SnapshotMode {
     /// 完整序列化、反序列化（默认）
     Full,
@@ -17,6 +22,7 @@ pub enum SnapshotMode {
 pub struct SnapshotRegistry {
     pub exporters: HashMap<&'static str, ExportFn>,
     pub importers: HashMap<&'static str, ImportFn>,
+    pub dyn_ctors: HashMap<&'static str, DynBuilderFn>,
     pub type_registry: HashMap<&'static str, TypeId>,
     pub component_id: HashMap<&'static str, CompIdFn>,
 }
@@ -81,6 +87,24 @@ impl SnapshotRegistry {
 
             world.entity_mut(entity).insert(val);
             Ok(())
+        });
+        self.dyn_ctors.insert(name, |val, world| {
+            let id = world.register_component::<T>();
+            //   let components = world.components();
+            // SAFETY: This component exists because it is present on the archetype.
+            let component: T = serde_json::from_value(val.clone()).map_err(|e| {
+                format!(
+                    "Deserialization error for {}:{} ",
+                    short_type_name::<T>(),
+                    e
+                )
+            })?;
+            let boxed = Box::new(component);
+            // SAFETY: boxed is properly aligned and has the right layout
+            let ptr =
+                unsafe { OwningPtr::new(NonNull::new_unchecked(Box::into_raw(boxed).cast())) };
+
+            Ok((id, ptr))
         });
     }
 

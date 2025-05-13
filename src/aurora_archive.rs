@@ -14,7 +14,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::archetype_archive::{
-    ArchetypeSnapshot, StorageTypeFlag, WorldArchSnapshot, load_world_arch_snapshot,
+    ArchetypeSnapshot, StorageTypeFlag, WorldArchSnapshot, load_world_arch_snapshot2 as load_world_arch_snapshot,
     save_world_arch_snapshot,
 };
 use crate::bevy_registry::SnapshotRegistry;

@@ -71,8 +71,8 @@ fn setup_registry() -> SnapshotRegistry {
     registry.register::<Tag>();
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
-    registry.register_with::<Vector2, Vector2Wrapper>();
-    registry.register_with::<ChildOf, ChildOfWrapper>();
+    // registry.register_with::<Vector2, Vector2Wrapper>();
+    // registry.register_with::<ChildOf, ChildOfWrapper>();
     registry
 }
 
@@ -145,6 +145,8 @@ fn test_roundtrip_with_children() {
     }
 
     let _ = fs::remove_file(path);
+    println!("new archtypes len:{}", new_world.archetypes().len());
+    println!("old archtypes len:{}", world.archetypes().len());
 }
 
 fn main() {
