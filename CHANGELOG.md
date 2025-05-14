@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.3] - 2024-05-14
+
+### Fix
+- Fix `DeferredEntityBuilder::insert_if_new_by_id` to properly insert the components.
+
 ## [0.1.2] - 2024-05-14
 
 ### Added
