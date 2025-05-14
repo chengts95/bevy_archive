@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.1.4] - 2024-05-14
+- Initial support for singleton/resource.
+
 ## [0.1.3] - 2024-05-14
 
 ### Fix

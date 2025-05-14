@@ -1,6 +1,7 @@
 use bevy_ecs::{
     component::{ComponentId, StorageType},
     prelude::*,
+    relationship::RelationshipSourceCollection,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -137,6 +138,38 @@ impl WorldArchSnapshot {
         //we may want to deduplicate entities here
         self.entities.sort_unstable();
     }
+}
+pub fn load_world_resource(
+    data: &HashMap<String, serde_json::Value>,
+    world: &mut World,
+    reg: &SnapshotRegistry,
+) {
+    let loadable_resource = data.keys();
+    for res in loadable_resource {
+        let factory = reg.get_res_factory(res);
+        match factory {
+            Some(factory) => {
+                (factory.import)(&data[res], world, Entity::from_raw(0)).unwrap();
+            }
+            None => {
+                //may need to emit warnings here
+            }
+        }
+    }
+}
+pub fn save_world_resource(
+    world: &World,
+    reg: &SnapshotRegistry,
+) -> HashMap<String, serde_json::Value> {
+    let mut map = HashMap::new();
+    let saveable_resource = reg.resource_entries.keys();
+    for res in saveable_resource {
+        let value = (reg.get_res_factory(res).unwrap().export)(world, Entity::from_raw(0));
+        if let Some(value) = value {
+            map.insert(res.to_string(), value);
+        }
+    }
+    map
 }
 pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldArchSnapshot {
     let mut world_snapshot = WorldArchSnapshot::default();

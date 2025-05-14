@@ -30,6 +30,12 @@ struct NestedComponent {
     inner: Vector2,
     name: String,
 }
+#[derive(Resource, Serialize, Deserialize, Debug, Clone)]
+struct ResComponent {
+    inner: Vector2,
+    name: String,
+    sim_duration: f64,
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug, Component)]
 pub struct Vector2([f32; 2]);
@@ -73,6 +79,7 @@ fn setup_registry() -> SnapshotRegistry {
     registry.register::<NestedComponent>();
     registry.register_with::<Vector2, Vector2Wrapper>();
     registry.register_with::<ChildOf, ChildOfWrapper>();
+    registry.resource_register::<ResComponent>();
     registry
 }
 
@@ -80,7 +87,11 @@ fn build_sample_world(world: &mut World) -> Entity {
     world.spawn((Position { x: 1.0, y: 2.0 }, Velocity { dx: 0.1, dy: -0.2 }));
     world.spawn((Tag, Position { x: 9.0, y: 3.5 }));
     world.spawn((Inventory(vec!["potion".into(), "sword".into()]),));
-
+    world.insert_resource(ResComponent {
+        inner: Vector2([0.0, 3.0]),
+        name: "sim_cfg".to_string(),
+        sim_duration: 10.0,
+    });
     let mut boss = world.spawn((
         Position { x: 0.0, y: 0.0 },
         Tag,
