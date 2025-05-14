@@ -90,10 +90,6 @@ fn main() {
     let mut new_world = World::new();
     load_world_manifest(&mut new_world, &loaded, &registry).unwrap();
 }
-```
-- `aurora_manifest_example.rs`: save/load a Bevy world with children using a structured manifest
-- `entity_snapshot.rs`: legacy entity-based archive with per-entity serialization
-
 ---
 
 Custom type wrappers can be added via:
@@ -102,6 +98,12 @@ Custom type wrappers can be added via:
 registry.register_with::<Vector2, Vector2Wrapper>(); 
 
 ```
+### Other examples
+- `aurora_manifest_example.rs`: save/load a Bevy world with children using a structured manifest
+- `entity_snapshot.rs`: legacy entity-based archive with per-entity serialization
+- `cross_ecs.rs`: example for **experimental** `flecs` <-> `bevy` data exchange.
+- `archetype_reduction_example.rs`: show how the deferred entity insertion can avoid archetype explosion in `bevy`
+
 
 
 ---
