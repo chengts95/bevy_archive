@@ -91,7 +91,7 @@ fn main() {
     load_world_manifest(&mut new_world, &loaded, &registry).unwrap();
 }
 ---
-
+```
 Custom type wrappers can be added via:
 ```rust
 //Vector2Wrapper need to implement From<&Vector> and Into<Vector2> for Vector2Wrapper
