@@ -230,7 +230,7 @@ pub fn load_world_arch_snapshot(
     }
 }
 
-pub fn load_world_arch_snapshot2(
+pub fn load_world_arch_snapshot_defragment(
     world: &mut World,
     snapshot: &WorldArchSnapshot,
     reg: &SnapshotRegistry,
@@ -472,7 +472,7 @@ mod tests {
 
         // 第三步：构建空世界并加载
         let mut world_new = World::new();
-        load_world_arch_snapshot2(&mut world_new, &snapshot_1, &registry);
+        load_world_arch_snapshot_defragment(&mut world_new, &snapshot_1, &registry);
 
         // 第四步：再次保存快照
         let snapshot_2 = save_world_arch_snapshot(&world_new, &registry);
