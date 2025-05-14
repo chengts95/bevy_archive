@@ -29,7 +29,7 @@ define_test_components!(
 );
 macro_rules! fixed_archetypes {
     ($max:expr) => {{
-        let mut list = vec![
+        let list = vec![
             vec![0, 1, 2, 6],
             vec![1, 2, 3, 3], // duplicated type to verify the override behavior
             vec![0, 3, 4, 5],
@@ -40,10 +40,11 @@ macro_rules! fixed_archetypes {
             vec![0, 5, 9, 6],
             vec![1, 6, 8, 2],
             vec![2, 7, 9, 4],
-            vec![0, 3, 2, 1],
+            vec![0, 3, 2, 1], //In the old way, these will trigger extra archtype if we do not merge to bundle.
             vec![0, 1, 2, 3],
+            vec![0, 2, 3, 1],
+            (0..$max).collect(),
         ];
-        list.push((0..$max).collect());
         list
     }};
 }
@@ -52,7 +53,7 @@ fn build_with_deferred(world: &mut World) {
     let bump = Bump::new();
     let archetypes = fixed_archetypes!(10);
     for i in 0..100 {
-        let types = &archetypes[i % 10];
+        let types = &archetypes[i % 14];
         let entity = world.spawn_empty().id();
         let mut builder = DeferredEntityBuilder::new(world, &bump, entity);
         for &ty in types {
@@ -77,7 +78,7 @@ fn build_with_deferred(world: &mut World) {
 fn build_with_commands(world: &mut World) {
     let archetypes = fixed_archetypes!(10);
     for i in 0..100 {
-        let types = archetypes[i % 10].clone();
+        let types = archetypes[i % 14].clone();
         let mut entity = world.spawn_empty();
         for ty in types {
             match ty {
