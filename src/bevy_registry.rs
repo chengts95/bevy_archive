@@ -1,4 +1,3 @@
-
 use bevy_ecs::ptr::{Aligned, OwningPtr};
 use bevy_ecs::{component::ComponentId, prelude::*};
 use bumpalo::Bump;
@@ -35,7 +34,7 @@ pub struct DeferredEntityBuilder<'a> {
     world: &'a mut World,
     entity: Entity,
     ids: Vec<ComponentId>,
-    ptrs: Vec<OwningPtr<'a,Aligned>>,
+    ptrs: Vec<OwningPtr<'a, Aligned>>,
     bump: &'a Bump,
 }
 
@@ -49,21 +48,23 @@ impl<'a> DeferredEntityBuilder<'a> {
             bump,
         }
     }
-
     pub fn insert<T: Component>(&mut self, value: T) {
         let id = self
             .world
             .component_id::<T>()
-            .unwrap_or(self.world.register_component::<T>());
+            .unwrap_or_else(|| self.world.register_component::<T>());
         let ptr = self.bump.alloc(value) as *mut T;
         let ptr = unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) };
-        self.ids.push(id);
-        self.ptrs.push(ptr);
+        self.insert_by_id(id, ptr);
     }
 
     pub fn insert_by_id(&mut self, id: ComponentId, ptr: OwningPtr<'a>) {
-        self.ids.push(id);
-        self.ptrs.push(ptr);
+        if let Some(i) = self.ids.iter().position(|&existing| existing == id) {
+            self.ptrs[i] = ptr; // replace old value
+        } else {
+            self.ids.push(id);
+            self.ptrs.push(ptr);
+        }
     }
 
     pub fn commit(mut self) {
@@ -215,7 +216,7 @@ impl SnapshotRegistry {
     pub fn comp_id_by_name(&self, name: &str, world: &World) -> Option<ComponentId> {
         self.component_id.get(name).and_then(|f| f(world))
     }
-    pub fn reg_by_name(&self, name: &str, world: & mut World) -> ComponentId {
+    pub fn reg_by_name(&self, name: &str, world: &mut World) -> ComponentId {
         self.component_register.get(name).unwrap()(world)
     }
     pub fn comp_id<T>(&self, world: &World) -> Option<ComponentId> {

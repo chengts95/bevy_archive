@@ -71,8 +71,8 @@ fn setup_registry() -> SnapshotRegistry {
     registry.register::<Tag>();
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
-    // registry.register_with::<Vector2, Vector2Wrapper>();
-    // registry.register_with::<ChildOf, ChildOfWrapper>();
+    registry.register_with::<Vector2, Vector2Wrapper>();
+    registry.register_with::<ChildOf, ChildOfWrapper>();
     registry
 }
 
