@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.2] - 2024-05-14
+
+### Added
+- `DeferredEntityBuilder` and `load_world_arch_snapshot_defragment` now support `insert_if_new`.
+
 ## [0.1.1] - 2024-05-14
 
 ### Added
