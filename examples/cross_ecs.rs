@@ -6,6 +6,7 @@ use bevy_archive::flecs_archsnaphot::*;
 use bevy_archive::flecs_registry::*;
 use bevy_archive::prelude::AuroraWorldManifest;
 use bevy_archive::prelude::WorldWithAurora;
+use bevy_ecs::name::Name;
 use bevy_ecs::prelude::Component as BevyComponent;
 use flecs_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,9 @@ pub struct ChildOfWrapper(pub u32);
 //         ChildOf(Entity::from_raw(self.0))
 //     }
 // }
+#[derive(Component, Serialize, Deserialize, Default)]
+pub struct NameID(pub String);
+
 fn setup_registry() -> SnapshotRegistry {
     let mut registry = SnapshotRegistry::default();
     registry.register::<Position>();
@@ -81,6 +85,16 @@ fn setup_registry() -> SnapshotRegistry {
     registry
 }
 
+impl From<&Name> for NameID {
+    fn from(value: &Name) -> Self {
+        Self(value.to_string())
+    }
+}
+impl Into<Name> for NameID {
+    fn into(self) -> Name {
+        Name::new(self.0)
+    }
+}
 fn setup_registry_bevy() -> bevy_archive::prelude::SnapshotRegistry {
     let mut registry = bevy_archive::prelude::SnapshotRegistry::default();
     registry.register::<Position>();
@@ -88,7 +102,8 @@ fn setup_registry_bevy() -> bevy_archive::prelude::SnapshotRegistry {
     //registry.register::<Tag>();
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
-    registry.register_with::<Vector2, Vector2Wrapper>(None);
+    registry.register_with::<Vector2, Vector2Wrapper>();
+    registry.register_with_name::<Name, NameID>("NameID");
     //registry.register_with::<ChildOf, ChildOfWrapper>();
     registry
 }

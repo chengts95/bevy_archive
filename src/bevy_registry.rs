@@ -21,6 +21,81 @@ pub enum SnapshotMode {
     Placeholder,
     PlaceholderEmplaceIfNotExists,
 }
+
+fn export_default<T: Serialize + Component>() -> ExportFn {
+    |world, entity| {
+        world
+            .entity(entity)
+            .get::<T>()
+            .and_then(|t| serde_json::to_value(t).ok())
+    }
+}
+
+fn import_default<T: DeserializeOwned + Component>() -> ImportFn {
+    |val, world, entity| {
+        let name = short_type_name::<T>();
+        serde_json::from_value::<T>(val.clone())
+            .map_err(|e| format!("Deserialization error for {}:{}", name, e))
+            .map(|v| {
+                world.entity_mut(entity).insert(v);
+            })
+            .map(|_| ())
+    }
+}
+
+fn dyn_ctor_default<T: DeserializeOwned + Component>() -> DynBuilderFn {
+    |val, bump| {
+        let name = short_type_name::<T>();
+        let component: T = serde_json::from_value(val.clone())
+            .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
+        let ptr = bump.alloc(component) as *mut T;
+        Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+    }
+}
+mod with_wrapper {
+    use super::*;
+    pub fn export_default<T: Component, T1: Serialize>() -> ExportFn
+    where
+        T1: for<'a> From<&'a T> + Into<T>,
+    {
+        |world, entity| {
+            world
+                .entity(entity)
+                .get::<T>()
+                .and_then(|t| serde_json::to_value(T1::from(t)).ok())
+        }
+    }
+
+    pub fn import_default<T: Component, T1: DeserializeOwned>() -> ImportFn
+    where
+        T1: for<'a> From<&'a T> + Into<T>,
+    {
+        |val, world, entity| {
+            let name = short_type_name::<T>();
+            serde_json::from_value::<T1>(val.clone())
+                .map_err(|e| format!("Deserialization error for {}:{}", name, e))
+                .map(|v| {
+                    let v: T = v.into();
+                    world.entity_mut(entity).insert(v);
+                })
+                .map(|_| ())
+        }
+    }
+
+    pub fn dyn_ctor_default<T, T1: DeserializeOwned>() -> DynBuilderFn
+    where
+        T1: for<'a> From<&'a T> + Into<T>,
+    {
+        |val, bump| {
+            let name = short_type_name::<T>();
+            let component: T1 = serde_json::from_value(val.clone())
+                .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
+            let component: T = component.into();
+            let ptr = bump.alloc(component) as *mut T;
+            Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct SnapshotFactory {
     pub import: ImportFn,
@@ -37,36 +112,6 @@ impl SnapshotFactory {
         world.component_id::<T>()
     }
 
-    fn export_default<T: Serialize + Component>() -> ExportFn {
-        |world, entity| {
-            world
-                .entity(entity)
-                .get::<T>()
-                .and_then(|t| serde_json::to_value(t).ok())
-        }
-    }
-
-    fn import_default<T: DeserializeOwned + Component>() -> ImportFn {
-        |val, world, entity| {
-            let name = short_type_name::<T>();
-            serde_json::from_value::<T>(val.clone())
-                .map_err(|e| format!("Deserialization error for {}:{}", name, e))
-                .map(|v| {
-                    world.entity_mut(entity).insert(v);
-                })
-                .map(|_| ())
-        }
-    }
-
-    fn dyn_ctor_default<T: DeserializeOwned + Component>() -> DynBuilderFn {
-        |val, bump| {
-            let name = short_type_name::<T>();
-            let component: T = serde_json::from_value(val.clone())
-                .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
-            let ptr = bump.alloc(component) as *mut T;
-            Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
-        }
-    }
     pub fn new_with<T>(mode: SnapshotMode) -> Self
     where
         T: Serialize + DeserializeOwned + Component + Default + 'static,
@@ -78,9 +123,23 @@ impl SnapshotFactory {
         T: Serialize + DeserializeOwned + Component + 'static,
     {
         Self {
-            export: Self::export_default::<T>(),
-            import: Self::import_default::<T>(),
-            dyn_ctor: Self::dyn_ctor_default::<T>(),
+            export: export_default::<T>(),
+            import: import_default::<T>(),
+            dyn_ctor: dyn_ctor_default::<T>(),
+            comp_id: Self::component_id::<T>,
+            register: |world| world.register_component::<T>(),
+            mode: SnapshotMode::Full,
+        }
+    }
+    pub fn new_with_wrapper_full<T, T1>() -> Self
+    where
+        T: Component,
+        T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
+    {
+        Self {
+            export: with_wrapper::export_default::<T, T1>(),
+            import: with_wrapper::import_default::<T, T1>(),
+            dyn_ctor: with_wrapper::dyn_ctor_default::<T, T1>(),
             comp_id: Self::component_id::<T>,
             register: |world| world.register_component::<T>(),
             mode: SnapshotMode::Full,
@@ -155,12 +214,12 @@ impl SnapshotFactory {
         T: Serialize + DeserializeOwned + Component + Default + 'static,
     {
         let export: ExportFn = match mode {
-            SnapshotMode::Full => Self::export_default::<T>(),
+            SnapshotMode::Full => export_default::<T>(),
             _ => |_, _| Some(serde_json::Value::Null),
         };
 
         let import: ImportFn = match mode {
-            SnapshotMode::Full => Self::import_default::<T>(),
+            SnapshotMode::Full => import_default::<T>(),
             SnapshotMode::Placeholder => |_, world, entity| {
                 world.entity_mut(entity).insert(T::default());
                 Ok(())
@@ -174,7 +233,7 @@ impl SnapshotFactory {
         };
 
         let dyn_ctor: DynBuilderFn = match mode {
-            SnapshotMode::Full => Self::dyn_ctor_default::<T>(),
+            SnapshotMode::Full => dyn_ctor_default::<T>(),
             _ => |_val, bump| {
                 let ptr = bump.alloc(T::default()) as *mut T;
                 Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
@@ -259,17 +318,33 @@ impl SnapshotRegistry {
         self.type_registry.insert(name, TypeId::of::<T>());
         self.entries.insert(name, SnapshotFactory::new::<T>());
     }
-    pub fn register_with<T, T1>(&mut self, mode: Option<SnapshotMode>)
+    pub fn register_with_name<T, T1>(&mut self, name: &'static str)
     where
         T: Component,
         T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
     {
+        self.type_registry.insert(name, TypeId::of::<T>());
+        self.entries
+            .insert(name, SnapshotFactory::new_with_wrapper_full::<T, T1>());
+    }
+    pub fn register_with_name_mode<T, T1>(&mut self, name: &'static str, mode: SnapshotMode)
+    where
+        T: Component,
+        T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
+    {
+        self.type_registry.insert(name, TypeId::of::<T>());
+        self.entries
+            .insert(name, SnapshotFactory::new_with_wrapper::<T, T1>(mode));
+    }
+    pub fn register_with<T, T1>(&mut self)
+    where
+        T: Component,
+        T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
+    {
         let name = short_type_name::<T>();
         self.type_registry.insert(name, TypeId::of::<T>());
-        self.entries.insert(
-            name,
-            SnapshotFactory::new_with_wrapper::<T, T1>(mode.unwrap_or_default()),
-        );
+        self.entries
+            .insert(name, SnapshotFactory::new_with_wrapper_full::<T, T1>());
     }
     pub fn register_with_mode<T>(&mut self, mode: SnapshotMode)
     where

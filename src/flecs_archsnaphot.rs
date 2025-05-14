@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[allow(dead_code)]
 struct SerializeTarget(u32);
 #[derive(Component, Serialize, Deserialize, Default)]
-pub struct NameID(String);
+pub struct NameID(pub String);
 fn all_entities(world: &World) -> &[u64] {
     let handle = world.entity_null();
     let all_entities = unsafe {
