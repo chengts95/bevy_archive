@@ -1,5 +1,4 @@
 use bevy_ecs::{
-    bundle,
     component::{ComponentId, StorageType},
     prelude::*,
 };
@@ -7,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, vec};
 
-use crate::bevy_registry::SnapshotRegistry;
+use crate::{bevy_registry::SnapshotRegistry, prelude::DeferredEntityBuilder};
 
 use super::entity_archive::{self as archive, *};
 
@@ -145,7 +144,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
     let reg_comp_ids: HashMap<ComponentId, &str> = reg
         .component_id
         .keys()
-        .filter_map(|&name| reg.comp_id_by_name(name, world).map(|cid| (cid, name)))
+        .filter_map(|&name| reg.comp_id_by_name(name, &world).map(|cid| (cid, name)))
         .collect();
 
     let snap = archetypes.map(|archetype| {
@@ -247,22 +246,28 @@ pub fn load_world_arch_snapshot2(
             .iter()
             .map(|x| reg.dyn_ctors.get(x.as_str()).unwrap())
             .collect();
+        let comp_names: Vec<_> = arch
+            .component_types
+            .iter()
+            .map(|x| {
+                reg.comp_id_by_name(x.as_str(), world)
+                    .unwrap_or(reg.reg_by_name(x, world))
+            })
+            .collect();
         let mut bump = bumpalo::Bump::new();
         for (row, entity) in entities.iter().enumerate() {
-            let mut iter_components = vec![];
-            let mut insert_ids = vec![];
+            let current_entity = world.entities().resolve_from_id(*entity).unwrap();
+            let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
             for (col_idx, type_name) in arch.component_types.iter().enumerate() {
                 let col = arch.get_column(&type_name).unwrap();
-                let (id, comp_ptr) = builders[col_idx](&col[row], world,& bump).unwrap();
-                iter_components.push(comp_ptr);
-                insert_ids.push(id);
+                let (id, comp_ptr) = (
+                    comp_names[col_idx],
+                    builders[col_idx](&col[row], &bump).unwrap(),
+                );
+                builder.insert_by_id(id, comp_ptr);
             }
-            let current_entity = world.entities().resolve_from_id(*entity).unwrap();
-            unsafe {
-                world
-                    .entity_mut(current_entity)
-                    .insert_by_ids(&insert_ids, iter_components.drain(..))
-            };
+
+            builder.commit();
             bump.reset();
         }
     }
