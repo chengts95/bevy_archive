@@ -48,7 +48,7 @@ macro_rules! fixed_archetypes {
         list
     }};
 }
-
+// rustfmt::skip
 fn build_with_deferred(world: &mut World) {
     let bump = Bump::new();
     let archetypes = fixed_archetypes!(10);
@@ -74,12 +74,14 @@ fn build_with_deferred(world: &mut World) {
         builder.commit();
     }
 }
-
+// rustfmt::skip
 fn build_with_commands(world: &mut World) {
     let archetypes = fixed_archetypes!(10);
+    let mut cmd = world.commands();
     for i in 0..100 {
         let types = archetypes[i % 14].clone();
-        let mut entity = world.spawn_empty();
+        let mut entity = cmd.spawn_empty();
+
         for ty in types {
             match ty {
                 0 => entity.insert(TestComp1(i)),
@@ -96,6 +98,8 @@ fn build_with_commands(world: &mut World) {
             };
         }
     }
+
+    world.flush();
 }
 fn old_load_world_manifest(
     world: &mut World,

@@ -4,7 +4,7 @@
 
 ### Added
 - `DeferredEntityBuilder` and `load_world_arch_snapshot_defragment` now support `insert_if_new`.
-
+- `load_world_arch_snapshot_defragment` now can ignore unknown types in the file.
 ## [0.1.1] - 2024-05-14
 
 ### Added

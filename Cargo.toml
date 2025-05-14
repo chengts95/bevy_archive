@@ -14,7 +14,7 @@ name = "cross_ecs"
 required-features = ["flecs"]
 
 [features]
-default = ["bevy","flecs"]
+default = ["bevy"]
 bevy = []
 flecs = ["flecs_ecs","bimap"]
 

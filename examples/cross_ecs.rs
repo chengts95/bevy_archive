@@ -85,7 +85,7 @@ fn setup_registry_bevy() -> bevy_archive::prelude::SnapshotRegistry {
     let mut registry = bevy_archive::prelude::SnapshotRegistry::default();
     registry.register::<Position>();
     registry.register::<Velocity>();
-    // registry.register::<Tag>();
+    //registry.register::<Tag>();
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
     registry.register_with::<Vector2, Vector2Wrapper>();

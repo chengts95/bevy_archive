@@ -243,17 +243,23 @@ pub fn load_world_arch_snapshot_defragment(
     for arch in &snapshot.archetypes {
         let entities = arch.entities();
 
-        let builders: Vec<_> = arch
+        let arch_info: Vec<_> = arch
             .component_types
             .iter()
-            .map(|x| reg.dyn_ctors.get(x.as_str()).unwrap())
-            .collect();
-        let comp_names: Vec<_> = arch
-            .component_types
-            .iter()
-            .map(|x| {
-                reg.comp_id_by_name(x.as_str(), world)
-                    .unwrap_or(reg.reg_by_name(x, world))
+            .enumerate()
+            .filter_map(|(col_idx, type_name)| {
+                let Some(ctor) = reg.dyn_ctors.get(type_name.as_str()) else {
+                    //we can emit warnings here
+                    return None;
+                };
+                let id = reg
+                    .comp_id_by_name(type_name.as_str(), world)
+                    .or_else(|| Some(reg.reg_by_name(type_name, world)))?;
+                let mode = reg
+                    .mode
+                    .get(type_name.as_str())
+                    .unwrap_or(&SnapshotMode::Full);
+                Some((col_idx, ctor, id, *mode))
             })
             .collect();
 
@@ -262,16 +268,9 @@ pub fn load_world_arch_snapshot_defragment(
             let current_entity = world.entities().resolve_from_id(*entity).unwrap();
 
             let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
-            for (col_idx, type_name) in arch.component_types.iter().enumerate() {
-                let mode = reg
-                    .mode
-                    .get(type_name.as_str())
-                    .unwrap_or(&SnapshotMode::Full);
-                let col = arch.get_column(&type_name).unwrap();
-                let (id, comp_ptr) = (
-                    comp_names[col_idx],
-                    builders[col_idx](&col[row], &bump).unwrap(),
-                );
+            for &(col_idx, ctor, comp_id, mode) in arch_info.iter() {
+                let col = &arch.columns[col_idx];
+                let (id, comp_ptr) = (comp_id, ctor(&col[row], &bump).unwrap());
                 match mode {
                     SnapshotMode::Full | SnapshotMode::Placeholder => {
                         builder.insert_by_id(id, comp_ptr);
