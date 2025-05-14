@@ -57,7 +57,17 @@ impl<'a> DeferredEntityBuilder<'a> {
         let ptr = unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) };
         self.insert_by_id(id, ptr);
     }
-
+    pub fn insert_if_new_by_id(&mut self, id: ComponentId, ptr: OwningPtr<'a>) {
+        if !self.world.entity(self.entity).contains_id(id) {
+            return;
+        }
+        if let Some(i) = self.ids.iter().position(|&existing| existing == id) {
+            self.ptrs[i] = ptr; // replace old value
+        } else {
+            self.ids.push(id);
+            self.ptrs.push(ptr);
+        }
+    }
     pub fn insert_by_id(&mut self, id: ComponentId, ptr: OwningPtr<'a>) {
         if let Some(i) = self.ids.iter().position(|&existing| existing == id) {
             self.ptrs[i] = ptr; // replace old value

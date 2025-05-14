@@ -143,7 +143,7 @@ fn main() {
     let loaded = AuroraWorldManifest::from_file("snapshot.toml", None).unwrap();
     old_load_world_manifest(&mut new_world, &loaded, &registry2).unwrap();
     println!(
-        "⚠️ Old way reloaded archetypes (snapshot): {}",
+        "⚠️  Old way reloaded archetypes (snapshot): {}",
         new_world.archetypes().len()
     );
     let _ = fs::remove_file("snapshot.toml");

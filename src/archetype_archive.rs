@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, vec};
 
-use crate::{bevy_registry::SnapshotRegistry, prelude::DeferredEntityBuilder};
+use crate::{
+    bevy_registry::SnapshotMode, bevy_registry::SnapshotRegistry, prelude::DeferredEntityBuilder,
+};
 
 use super::entity_archive::{self as archive, *};
 
@@ -254,17 +256,31 @@ pub fn load_world_arch_snapshot_defragment(
                     .unwrap_or(reg.reg_by_name(x, world))
             })
             .collect();
+
         let mut bump = bumpalo::Bump::new();
         for (row, entity) in entities.iter().enumerate() {
             let current_entity = world.entities().resolve_from_id(*entity).unwrap();
+
             let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
             for (col_idx, type_name) in arch.component_types.iter().enumerate() {
+                let mode = reg
+                    .mode
+                    .get(type_name.as_str())
+                    .unwrap_or(&SnapshotMode::Full);
                 let col = arch.get_column(&type_name).unwrap();
                 let (id, comp_ptr) = (
                     comp_names[col_idx],
                     builders[col_idx](&col[row], &bump).unwrap(),
                 );
-                builder.insert_by_id(id, comp_ptr);
+                match mode {
+                    SnapshotMode::Full | SnapshotMode::Placeholder => {
+                        builder.insert_by_id(id, comp_ptr);
+                    }
+
+                    SnapshotMode::PlaceholderEmplaceIfNotExists => {
+                        builder.insert_if_new_by_id(id, comp_ptr);
+                    }
+                }
             }
 
             builder.commit();
