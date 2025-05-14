@@ -1,5 +1,10 @@
 # bevy_archive
 
+
+[![Crates.io](https://img.shields.io/crates/v/bevy_archive.svg)](https://crates.io/crates/bevy_archive)
+[![Docs.rs](https://docs.rs/bevy_archive/badge.svg)](https://docs.rs/bevy_archive)
+[![CI](https://github.com/chengts95/bevy_archive/actions/workflows/rust.yml/badge.svg)](https://github.com/chengts95/bevy_archive/actions)
+
 **bevy_archive** is an experimental project for exploring ECS world storage and loading strategies based on archetype decomposition and structured serialization.
 
 It uses a combination of serialization formats to balance:
