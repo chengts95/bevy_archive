@@ -144,7 +144,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
     world_snapshot.entities.sort_unstable();
     let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
     let reg_comp_ids: HashMap<ComponentId, &str> = reg
-        .component_id
+        .type_registry
         .keys()
         .filter_map(|&name| reg.comp_id_by_name(name, &world).map(|cid| (cid, name)))
         .collect();
@@ -171,7 +171,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                     StorageType::Table => StorageTypeFlag::Table,
                     StorageType::SparseSet => StorageTypeFlag::SparseSet,
                 });
-                let f = reg.exporters.get(type_name).unwrap();
+                let f = reg.get_factory(type_name).unwrap().export;
                 archetype_snapshot.add_type(type_name, t);
                 let col = archetype_snapshot.get_column_mut(type_name).unwrap();
                 for (idx, &entity) in iter.iter().enumerate() {
@@ -211,7 +211,7 @@ pub fn load_world_arch_snapshot(
             let un = entities.iter().zip(col.iter());
             for (entity_id, value) in un {
                 let entity = Entity::from_raw(*entity_id);
-                match reg.importers.get(type_name.as_str()) {
+                match reg.get_factory(&type_name).map(|x| x.import) {
                     Some(func) => {
                         if let Err(e) = func(value, world, entity) {
                             eprintln!(
@@ -248,18 +248,15 @@ pub fn load_world_arch_snapshot_defragment(
             .iter()
             .enumerate()
             .filter_map(|(col_idx, type_name)| {
-                let Some(ctor) = reg.dyn_ctors.get(type_name.as_str()) else {
+                let Some(factory) = reg.get_factory(&type_name) else {
                     //we can emit warnings here
                     return None;
                 };
                 let id = reg
                     .comp_id_by_name(type_name.as_str(), world)
                     .or_else(|| Some(reg.reg_by_name(type_name, world)))?;
-                let mode = reg
-                    .mode
-                    .get(type_name.as_str())
-                    .unwrap_or(&SnapshotMode::Full);
-                Some((col_idx, ctor, id, *mode))
+                let mode = factory.mode;
+                Some((col_idx, factory.dyn_ctor, id, mode))
             })
             .collect();
 

@@ -34,7 +34,7 @@ struct NestedComponent {
 #[derive(Clone, Serialize, Deserialize, Debug, Component)]
 pub struct Vector2([f32; 2]);
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct Vector2Wrapper {
     pub x: f32,
     pub y: f32,
@@ -52,7 +52,7 @@ impl Into<Vector2> for Vector2Wrapper {
         Vector2([self.x, self.y])
     }
 }
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct ChildOfWrapper(pub u32);
 impl From<&ChildOf> for ChildOfWrapper {
     fn from(c: &ChildOf) -> Self {
@@ -71,8 +71,8 @@ fn setup_registry() -> SnapshotRegistry {
     registry.register::<Tag>();
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
-    registry.register_with::<Vector2, Vector2Wrapper>();
-    registry.register_with::<ChildOf, ChildOfWrapper>();
+    registry.register_with::<Vector2, Vector2Wrapper>(None);
+    registry.register_with::<ChildOf, ChildOfWrapper>(None);
     registry
 }
 

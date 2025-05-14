@@ -88,7 +88,7 @@ fn setup_registry_bevy() -> bevy_archive::prelude::SnapshotRegistry {
     //registry.register::<Tag>();
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
-    registry.register_with::<Vector2, Vector2Wrapper>();
+    registry.register_with::<Vector2, Vector2Wrapper>(None);
     //registry.register_with::<ChildOf, ChildOfWrapper>();
     registry
 }
