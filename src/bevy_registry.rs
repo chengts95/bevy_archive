@@ -298,7 +298,7 @@ impl<'a> DeferredEntityBuilder<'a> {
     }
 }
 
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Clone, Default, Debug)]
 pub struct SnapshotRegistry {
     pub type_registry: HashMap<&'static str, TypeId>,
     pub entries: HashMap<&'static str, SnapshotFactory>,
