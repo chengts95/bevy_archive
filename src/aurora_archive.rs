@@ -15,7 +15,8 @@ use std::path::Path;
 
 use crate::archetype_archive::{
     ArchetypeSnapshot, StorageTypeFlag, WorldArchSnapshot,
-    load_world_arch_snapshot_defragment as load_world_arch_snapshot, save_world_arch_snapshot,
+    load_world_arch_snapshot_defragment as load_world_arch_snapshot, load_world_resource,
+    save_world_arch_snapshot, save_world_resource,
 };
 use crate::bevy_registry::SnapshotRegistry;
 use crate::csv_archive::ColumnarCsv;
@@ -146,6 +147,7 @@ pub struct WorldWithAurora {
     pub archetypes: Vec<ArchetypeSpec>,
     #[serde(default)]
     pub embed: HashMap<String, EmbeddedBlob>,
+    pub resources: HashMap<String, serde_json::Value>,
 }
 
 impl WorldWithAurora {
@@ -197,6 +199,7 @@ impl From<&WorldArchSnapshot> for WorldWithAurora {
             archetypes,
             embed,
             name: None,
+            resources: HashMap::new(),
         }
     }
 }
@@ -287,8 +290,8 @@ pub fn save_world_manifest(
     registry: &SnapshotRegistry,
 ) -> Result<AuroraWorldManifest, String> {
     let snapshot = save_world_arch_snapshot(world, registry);
-    let world_with_aurora = WorldWithAurora::from(&snapshot);
-
+    let mut world_with_aurora = WorldWithAurora::from(&snapshot);
+    world_with_aurora.resources = save_world_resource(world, registry);
     Ok(AuroraWorldManifest {
         metadata: None,
         world: world_with_aurora,
@@ -311,7 +314,9 @@ pub fn load_world_manifest(
     manifest: &AuroraWorldManifest,
     registry: &SnapshotRegistry,
 ) -> Result<(), String> {
+    let resource = &manifest.world.resources;
     let snapshot: WorldArchSnapshot = (&manifest.world).into();
+    load_world_resource(resource, world, registry);
     load_world_arch_snapshot(world, &snapshot, registry);
     Ok(())
 }
