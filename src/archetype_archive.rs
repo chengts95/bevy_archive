@@ -1,7 +1,6 @@
 use bevy_ecs::{
     component::{ComponentId, StorageType},
     prelude::*,
-    relationship::RelationshipSourceCollection,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

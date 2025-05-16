@@ -361,6 +361,13 @@ impl SnapshotRegistry {
         self.entries
             .insert(name, SnapshotFactory::new_with_wrapper::<T, T1>(mode));
     }
+    pub fn register_named<T>(&mut self, name: &'static str)
+    where
+        T: Component + Serialize + DeserializeOwned,
+    {
+        self.type_registry.insert(name, TypeId::of::<T>());
+        self.entries.insert(name, SnapshotFactory::new::<T>());
+    }
     pub fn register_with<T, T1>(&mut self)
     where
         T: Component,
