@@ -2,7 +2,10 @@
 
 ## [0.1.4] - 2024-05-14
 - Initial support for singleton/resource.
-
+- Initial support for merging snapshot.
+- Initial support for binary (msgpack) data format.
+- Initial support for export options.
+  
 ## [0.1.3] - 2024-05-14
 
 ### Fix
