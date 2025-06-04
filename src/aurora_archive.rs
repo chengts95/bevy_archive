@@ -6,12 +6,14 @@
 //! - Blob loading, embedding, parsing
 //! - Roundtrip serialization to file
 
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use bevy_ecs::world::World;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::archetype_archive::{
     ArchetypeSnapshot, StorageTypeFlag, WorldArchSnapshot,
@@ -45,7 +47,7 @@ impl From<&str> for AuroraLocation {
 pub enum AuroraFormat {
     Csv,
     Json,
-    Binary,
+    MsgPack, // msgpack
     Unknown,
 }
 
@@ -55,6 +57,8 @@ impl AuroraFormat {
             Self::Csv
         } else if path.ends_with(".json") {
             Self::Json
+        } else if path.ends_with(".msgpack") {
+            Self::MsgPack
         } else {
             Self::Unknown
         }
@@ -64,6 +68,7 @@ impl AuroraFormat {
         match s {
             "csv" => Self::Csv,
             "json" => Self::Json,
+            "msgpack" => Self::MsgPack,
             _ => Self::Unknown,
         }
     }
@@ -79,27 +84,68 @@ pub enum AuroraInternalFormat {
     ColumnarCsv(ColumnarCsv),
     ArchetypeSnapshot(ArchetypeSnapshot),
 }
+/// Load a blob from a specified `AuroraLocation`, resolving relative paths with a base directory.
+///
+/// # Parameters
+/// - `loc`: The logical location (file path, embedded, etc.)
+/// - `embed_map`: Embedded blob map for `embed://` references.
+/// - `base_dir`: Base directory used to resolve `file://` relative paths.
+///
+/// # Returns
+/// A `LoadedBlob` with its bytes and format.
+pub fn load_blob_from_location_with_base(
+    loc: &AuroraLocation,
+    embed_map: &HashMap<String, EmbeddedBlob>,
+    base_dir: &Path,
+) -> Result<LoadedBlob, String> {
+    match loc {
+        AuroraLocation::File(raw_path) => {
+            let relative_path = Path::new(raw_path);
+            let full_path = if relative_path.is_absolute() {
+                relative_path.to_path_buf()
+            } else {
+                base_dir.join(relative_path)
+            };
+
+            let bytes = fs::read(&full_path)
+                .map_err(|e| format!("Failed to read {}: {}", full_path.display(), e))?;
+
+            let format = AuroraFormat::from_path(
+                full_path.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+            );
+
+            Ok(LoadedBlob { format, bytes })
+        }
+
+        AuroraLocation::Embed(name) => {
+            let blob = embed_map.get(name).ok_or_else(|| {
+                format!(
+                    "Embedded blob '{}' not found in manifest embed section.",
+                    name
+                )
+            })?;
+
+            let format = AuroraFormat::from_str(&blob.format);
+
+            let bytes = match format {
+                AuroraFormat::MsgPack => BASE64_STANDARD
+                    .decode(&blob.data)
+                    .map_err(|e| format!("Base64 decode failed: {}", e))?,
+                _ => blob.data.as_bytes().to_vec(),
+            };
+
+            Ok(LoadedBlob { format, bytes })
+        }
+
+        AuroraLocation::Unknown(s) => Err(format!("Unknown location type: {}", s)),
+    }
+}
 
 pub fn load_blob_from_location(
     loc: &AuroraLocation,
     embed_map: &HashMap<String, EmbeddedBlob>,
 ) -> Result<LoadedBlob, String> {
-    match loc {
-        AuroraLocation::File(path) => {
-            let bytes = fs::read(path).map_err(|e| e.to_string())?;
-            let format = AuroraFormat::from_path(path);
-            Ok(LoadedBlob { format, bytes })
-        }
-        AuroraLocation::Embed(name) => {
-            let blob = embed_map.get(name).ok_or("Missing embed")?;
-            let format = AuroraFormat::from_str(&blob.format);
-            Ok(LoadedBlob {
-                format,
-                bytes: blob.data.as_bytes().to_vec(),
-            })
-        }
-        _ => Err("Unsupported".into()),
-    }
+    load_blob_from_location_with_base(loc, embed_map, Path::new("."))
 }
 
 fn parse_blob(blob: &LoadedBlob) -> Result<AuroraInternalFormat, String> {
@@ -110,16 +156,11 @@ fn parse_blob(blob: &LoadedBlob) -> Result<AuroraInternalFormat, String> {
         AuroraFormat::Json => serde_json::from_slice(&blob.bytes)
             .map(AuroraInternalFormat::ArchetypeSnapshot)
             .map_err(|e| e.to_string()),
+        AuroraFormat::MsgPack => rmp_serde::from_slice(&blob.bytes)
+            .map(AuroraInternalFormat::ArchetypeSnapshot)
+            .map_err(|e| e.to_string()),
         _ => Err("Cannot parse unknown format".into()),
     }
-}
-
-pub fn load_and_parse(
-    loc: &AuroraLocation,
-    embed: &HashMap<String, EmbeddedBlob>,
-) -> Result<AuroraInternalFormat, String> {
-    let blob = load_blob_from_location(loc, embed)?;
-    parse_blob(&blob)
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -134,10 +175,30 @@ pub struct ArchetypeSpec {
     pub source: Url,
 }
 
+#[derive(Clone)]
+pub enum ExportFormat {
+    Csv,
+    Json,
+    MsgPack,
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EmbeddedBlob {
     pub format: String,
     pub data: String,
+}
+#[derive(Clone)]
+pub enum OutputStrategy {
+    Embed(ExportFormat),
+
+    File(ExportFormat, std::path::PathBuf),
+}
+
+#[derive(Clone)]
+pub struct ExportGuidance {
+    pub default: OutputStrategy,
+
+    pub per_arch: HashMap<usize, OutputStrategy>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -149,16 +210,103 @@ pub struct WorldWithAurora {
     pub embed: HashMap<String, EmbeddedBlob>,
     pub resources: HashMap<String, serde_json::Value>,
 }
-
 impl WorldWithAurora {
-    pub fn from_file(path: &str) -> Result<Self, String> {
-        let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).map_err(|e| e.to_string())
-    }
+    pub fn from_guided(world: &WorldArchSnapshot, guidance: &ExportGuidance) -> Self {
+        let mut archetypes = Vec::new();
+        let mut embed = HashMap::new();
 
-    pub fn to_file(&self, path: &str) -> Result<(), String> {
-        let content = serde_json::to_string(self).map_err(|e| e.to_string())?;
-        fs::write(path, content).map_err(|e| e.to_string())
+        for (i, arch) in world.archetypes.iter().enumerate() {
+            if arch.is_empty() {
+                continue;
+            }
+
+            let strat = guidance
+                .per_arch
+                .get(&i)
+                .cloned()
+                .unwrap_or_else(|| guidance.default.clone());
+
+            let (source, blob_opt) = match strat {
+                OutputStrategy::Embed(fmt) => {
+                    let blob = match fmt {
+                        ExportFormat::Csv => {
+                            let csv = columnar_from_snapshot(arch);
+                            let mut data = Vec::new();
+                            csv.to_csv_writer(&mut data).unwrap();
+                            EmbeddedBlob {
+                                format: "csv".into(),
+                                data: String::from_utf8(data).unwrap(),
+                            }
+                        }
+                        ExportFormat::MsgPack => {
+                            let bytes = rmp_serde::to_vec(arch).unwrap();
+                            EmbeddedBlob {
+                                format: "msgpack".into(),
+                                data: BASE64_STANDARD.encode(&bytes),
+                            }
+                        }
+                        ExportFormat::Json => {
+                            let json = serde_json::to_string(arch).unwrap();
+                            EmbeddedBlob {
+                                format: "json".into(),
+                                data: json,
+                            }
+                        }
+                    };
+                    (Url(format!("embed://arch_{}", i)), Some(blob))
+                }
+
+                OutputStrategy::File(fmt, ref base_path) => {
+                    let ext = match fmt {
+                        ExportFormat::Csv => "csv",
+                        ExportFormat::MsgPack => "msgpack",
+                        ExportFormat::Json => "json",
+                    };
+                    let file_path = base_path.join(format!("arch_{}.{}", i, ext));
+                    if let Some(parent) = file_path.parent() {
+                        std::fs::create_dir_all(parent).unwrap();
+                    }
+
+                    match fmt {
+                        ExportFormat::Csv => {
+                            let csv = columnar_from_snapshot(arch);
+                            let mut data = Vec::new();
+                            csv.to_csv_writer(&mut data).unwrap();
+                            std::fs::write(&file_path, data).unwrap();
+                        }
+                        ExportFormat::MsgPack => {
+                            let data = rmp_serde::to_vec(arch).unwrap();
+                            std::fs::write(&file_path, &data).unwrap();
+                        }
+                        ExportFormat::Json => {
+                            let json = serde_json::to_string(arch).unwrap();
+                            std::fs::write(&file_path, &json).unwrap();
+                        }
+                    }
+
+                    (Url(format!("file://{}", file_path.display())), None)
+                }
+            };
+
+            archetypes.push(ArchetypeSpec {
+                name: Some(format!("arch_{}", i)),
+                components: arch.component_types.clone(),
+                storage: None,
+                source,
+            });
+
+            if let Some(blob) = blob_opt {
+                embed.insert(format!("arch_{}", i), blob);
+            }
+        }
+
+        Self {
+            version: "0.1".into(),
+            archetypes,
+            embed,
+            name: None,
+            resources: HashMap::new(),
+        }
     }
 }
 
@@ -248,6 +396,50 @@ pub enum ManifestOutputFormat {
     #[default]
     Toml,
 }
+
+impl ExportGuidance {
+    pub fn embed_all(format: ExportFormat) -> Self {
+        Self {
+            default: OutputStrategy::Embed(format),
+            per_arch: HashMap::new(),
+        }
+    }
+
+    pub fn file_all(format: ExportFormat, base_path: impl Into<PathBuf>) -> Self {
+        let base = base_path.into();
+        Self {
+            default: OutputStrategy::File(format.clone(), base),
+            per_arch: HashMap::new(),
+        }
+    }
+
+    /// 设置某个 Archetype 的导出策略
+    pub fn set_strategy_for(&mut self, index: usize, strategy: OutputStrategy) -> &mut Self {
+        self.per_arch.insert(index, strategy);
+        self
+    }
+
+    pub fn embed_as(&mut self, index: usize, fmt: ExportFormat) -> &mut Self {
+        self.set_strategy_for(index, OutputStrategy::Embed(fmt))
+    }
+
+    pub fn file_as(
+        &mut self,
+        index: usize,
+        fmt: ExportFormat,
+        path: impl Into<PathBuf>,
+    ) -> &mut Self {
+        self.set_strategy_for(index, OutputStrategy::File(fmt, path.into()))
+    }
+
+    pub fn get_strategy(&self, index: usize) -> OutputStrategy {
+        self.per_arch
+            .get(&index)
+            .cloned()
+            .unwrap_or_else(|| self.default.clone())
+    }
+}
+
 impl AuroraWorldManifest {
     /// Save the manifest to a file.
     ///
@@ -389,6 +581,20 @@ pub fn read_manifest_from_file<P: AsRef<Path>>(
     }
 }
 
+pub fn save_world_manifest_with_guidance(
+    world: &World,
+    registry: &SnapshotRegistry,
+    guidance: &ExportGuidance,
+) -> Result<AuroraWorldManifest, String> {
+    let snapshot = save_world_arch_snapshot(world, registry);
+    let mut world_with_aurora = WorldWithAurora::from_guided(&snapshot, guidance);
+    world_with_aurora.resources = save_world_resource(world, registry);
+    Ok(AuroraWorldManifest {
+        metadata: None,
+        world: world_with_aurora,
+    })
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -505,5 +711,52 @@ mod tests {
         let mut world2 = World::new();
         load_world_manifest(&mut world2, &snapshot, &registry).unwrap();
         load_world_manifest(&mut world2, &deserialized, &registry).unwrap();
+    }
+
+    #[test]
+    fn test_msgpack_manifest_snapshot_roundtrip() {
+        let path = "test.toml";
+
+        let (world, registry) = init_world();
+        let guide = ExportGuidance::embed_all(ExportFormat::MsgPack);
+
+        let snapshot = save_world_manifest_with_guidance(&world, &registry, &guide).unwrap();
+        snapshot.to_file(path, None).unwrap();
+
+        assert!(Path::new(path).exists(), "File not written");
+
+        let toml = fs::read_to_string(path).unwrap();
+        let deserialized: AuroraWorldManifest =
+            toml::from_str(&toml).expect("Failed to deserialize TOML");
+
+        let mut world2 = World::new();
+        load_world_manifest(&mut world2, &snapshot, &registry).unwrap();
+        load_world_manifest(&mut world2, &deserialized, &registry).unwrap();
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_msgpack_manifest_snapshot_roundtrip_file() {
+        let path = "test.toml";
+        let arch_type_path = "arch_default";
+        let (world, registry) = init_world();
+        let guide = ExportGuidance::file_all(ExportFormat::Csv, arch_type_path);
+
+        let snapshot = save_world_manifest_with_guidance(&world, &registry, &guide).unwrap();
+        snapshot.to_file(path, None).unwrap();
+
+        assert!(Path::new(path).exists(), "File not written");
+
+        let toml = fs::read_to_string(path).unwrap();
+        let deserialized: AuroraWorldManifest =
+            toml::from_str(&toml).expect("Failed to deserialize TOML");
+
+        let mut world2 = World::new();
+        load_world_manifest(&mut world2, &snapshot, &registry).unwrap();
+        load_world_manifest(&mut world2, &deserialized, &registry).unwrap();
+
+        fs::remove_file(path).ok();
+        fs::remove_dir_all(arch_type_path).ok();
     }
 }
