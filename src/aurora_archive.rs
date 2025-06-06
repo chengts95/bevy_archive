@@ -47,7 +47,8 @@ impl From<&str> for AuroraLocation {
 pub enum AuroraFormat {
     Csv,
     Json,
-    MsgPack, // msgpack
+    MsgPack,    // msgpack
+    CsvMsgPack, // csv in msgpack
     Unknown,
 }
 
@@ -57,6 +58,8 @@ impl AuroraFormat {
             Self::Csv
         } else if path.ends_with(".json") {
             Self::Json
+        } else if path.ends_with(".csv.msgpack") {
+            Self::CsvMsgPack
         } else if path.ends_with(".msgpack") {
             Self::MsgPack
         } else {
@@ -69,6 +72,7 @@ impl AuroraFormat {
             "csv" => Self::Csv,
             "json" => Self::Json,
             "msgpack" => Self::MsgPack,
+            "csv.msgpack" => Self::CsvMsgPack,
             _ => Self::Unknown,
         }
     }
@@ -128,7 +132,7 @@ pub fn load_blob_from_location_with_base(
             let format = AuroraFormat::from_str(&blob.format);
 
             let bytes = match format {
-                AuroraFormat::MsgPack => BASE64_STANDARD
+                AuroraFormat::MsgPack | AuroraFormat::CsvMsgPack => BASE64_STANDARD
                     .decode(&blob.data)
                     .map_err(|e| format!("Base64 decode failed: {}", e))?,
                 _ => blob.data.as_bytes().to_vec(),
@@ -159,6 +163,9 @@ fn parse_blob(blob: &LoadedBlob) -> Result<AuroraInternalFormat, String> {
         AuroraFormat::MsgPack => rmp_serde::from_slice(&blob.bytes)
             .map(AuroraInternalFormat::ArchetypeSnapshot)
             .map_err(|e| e.to_string()),
+        AuroraFormat::CsvMsgPack => rmp_serde::from_slice(&blob.bytes)
+            .map(AuroraInternalFormat::ColumnarCsv)
+            .map_err(|e| e.to_string()),
         _ => Err("Cannot parse unknown format".into()),
     }
 }
@@ -180,6 +187,7 @@ pub enum ExportFormat {
     Csv,
     Json,
     MsgPack,
+    CsvMsgPack,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -245,6 +253,14 @@ impl WorldWithAurora {
                                 data: BASE64_STANDARD.encode(&bytes),
                             }
                         }
+                        ExportFormat::CsvMsgPack => {
+                            let csv = columnar_from_snapshot(arch);
+                            let bytes = rmp_serde::to_vec(&csv).unwrap();
+                            EmbeddedBlob {
+                                format: "csv.msgpack".into(),
+                                data: BASE64_STANDARD.encode(&bytes),
+                            }
+                        }
                         ExportFormat::Json => {
                             let json = serde_json::to_string(arch).unwrap();
                             EmbeddedBlob {
@@ -261,6 +277,7 @@ impl WorldWithAurora {
                         ExportFormat::Csv => "csv",
                         ExportFormat::MsgPack => "msgpack",
                         ExportFormat::Json => "json",
+                        ExportFormat::CsvMsgPack => "csv.msgpack",
                     };
                     let file_path = base_path.join(format!("arch_{}.{}", i, ext));
                     if let Some(parent) = file_path.parent() {
@@ -281,6 +298,11 @@ impl WorldWithAurora {
                         ExportFormat::Json => {
                             let json = serde_json::to_string(arch).unwrap();
                             std::fs::write(&file_path, &json).unwrap();
+                        }
+                        ExportFormat::CsvMsgPack => {
+                            let csv = ColumnarCsv::from(arch);
+                            let msgpack = rmp_serde::to_vec(&csv).unwrap();
+                            std::fs::write(&file_path, &msgpack).unwrap();
                         }
                     }
 
@@ -365,10 +387,10 @@ impl From<&WorldWithAurora> for WorldArchSnapshot {
             let snapshot = match parsed {
                 AuroraInternalFormat::ColumnarCsv(csv) => {
                     let mut snap: ArchetypeSnapshot = (&csv).into();
-                    snap.storage_types = arch
-                        .storage
-                        .clone()
-                        .unwrap_or(vec![StorageTypeFlag::Table; snap.entities.len()]);
+                    snap.storage_types =
+                        arch.storage
+                            .clone()
+                            .unwrap_or(vec![StorageTypeFlag::Table; snap.component_types.len()]);
                     snap
                 }
                 AuroraInternalFormat::ArchetypeSnapshot(data) => data,
@@ -741,7 +763,51 @@ mod tests {
         let path = "test.toml";
         let arch_type_path = "arch_default";
         let (world, registry) = init_world();
-        let guide = ExportGuidance::file_all(ExportFormat::Csv, arch_type_path);
+        let guide = ExportGuidance::file_all(ExportFormat::MsgPack, arch_type_path);
+
+        let snapshot = save_world_manifest_with_guidance(&world, &registry, &guide).unwrap();
+        snapshot.to_file(path, None).unwrap();
+
+        assert!(Path::new(path).exists(), "File not written");
+
+        let toml = fs::read_to_string(path).unwrap();
+        let deserialized: AuroraWorldManifest =
+            toml::from_str(&toml).expect("Failed to deserialize TOML");
+
+        let mut world2 = World::new();
+        load_world_manifest(&mut world2, &snapshot, &registry).unwrap();
+        load_world_manifest(&mut world2, &deserialized, &registry).unwrap();
+
+        fs::remove_file(path).ok();
+        fs::remove_dir_all(arch_type_path).ok();
+    }
+    #[test]
+    fn test_csv_msgpack_manifest_snapshot_roundtrip() {
+        let path = "test.toml";
+
+        let (world, registry) = init_world();
+        let guide = ExportGuidance::embed_all(ExportFormat::CsvMsgPack);
+
+        let snapshot = save_world_manifest_with_guidance(&world, &registry, &guide).unwrap();
+        snapshot.to_file(path, None).unwrap();
+
+        assert!(Path::new(path).exists(), "File not written");
+
+        let toml = fs::read_to_string(path).unwrap();
+        let deserialized: AuroraWorldManifest =
+            toml::from_str(&toml).expect("Failed to deserialize TOML");
+
+        let mut world2 = World::new();
+        load_world_manifest(&mut world2, &snapshot, &registry).unwrap();
+        load_world_manifest(&mut world2, &deserialized, &registry).unwrap();
+        fs::remove_file(path).ok();
+    }
+    #[test]
+    fn test_csv_msgpack_manifest_snapshot_roundtrip_file() {
+        let path = "test.toml";
+        let arch_type_path = "arch_default";
+        let (world, registry) = init_world();
+        let guide = ExportGuidance::file_all(ExportFormat::CsvMsgPack, arch_type_path);
 
         let snapshot = save_world_manifest_with_guidance(&world, &registry, &guide).unwrap();
         snapshot.to_file(path, None).unwrap();
