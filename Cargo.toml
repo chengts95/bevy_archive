@@ -12,11 +12,15 @@ categories = ["data-structures"]
 [[example]]
 name = "cross_ecs"
 required-features = ["flecs"]
+[[example]]
+name = "arrow_archive"
+required-features = ["arrow"]
 
 [features]
-default = ["bevy"]
+default = ["bevy","arrow"]
 bevy = []
 flecs = ["flecs_ecs","bimap"]
+arrow = ["dep:serde_arrow"]
 
 [dependencies]
 bevy_ecs =  "^0.16.0"
@@ -29,3 +33,4 @@ flecs_ecs = { version = "^0.1", optional = true }
 bumpalo = "3.17.0"
 rmp-serde = "1.3.0"
 base64 = "0.22.1"
+serde_arrow= { version = "^0.13.3", optional = true,features=["arrow-55"] }

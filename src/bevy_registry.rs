@@ -7,6 +7,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::ptr::NonNull;
 mod snapshot_factory;
+pub mod vec_snapshot_factory;
 pub use snapshot_factory::*;
 
 pub struct DeferredEntityBuilder<'a> {
