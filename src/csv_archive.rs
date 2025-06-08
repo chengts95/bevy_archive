@@ -1,5 +1,7 @@
 use csv::Reader;
 use csv::Writer;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -14,7 +16,7 @@ pub struct ComponentColumnGroup {
     pub fields: Vec<String>, // ["TestComponentA.value"]
 }
 
-#[derive(Debug)]
+#[derive(Debug,Serialize,Deserialize)]
 pub struct ColumnarCsv {
     pub headers: Vec<String>,
     pub columns: Vec<Vec<serde_json::Value>>,

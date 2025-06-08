@@ -56,12 +56,42 @@ impl<'a> DeferredEntityBuilder<'a> {
         unsafe { entity.insert_by_ids(&self.ids, self.ptrs.drain(..)) };
     }
 }
-
+pub trait SnapshotMerge {
+    fn merge_only_new(&mut self, other: &Self);
+    fn merge(&mut self, other: &Self);
+}
 #[derive(Resource, Clone, Default, Debug)]
 pub struct SnapshotRegistry {
     pub type_registry: HashMap<&'static str, TypeId>,
     pub entries: HashMap<&'static str, SnapshotFactory>,
     pub resource_entries: HashMap<&'static str, SnapshotFactory>,
+}
+impl SnapshotMerge for SnapshotRegistry {
+    fn merge_only_new(&mut self, other: &Self) {
+        for (name, type_id) in &other.type_registry {
+            self.type_registry.entry(*name).or_insert(*type_id);
+        }
+        for (name, factory) in &other.entries {
+            self.entries.entry(*name).or_insert_with(|| factory.clone());
+        }
+        for (name, factory) in &other.resource_entries {
+            self.resource_entries
+                .entry(*name)
+                .or_insert_with(|| factory.clone());
+        }
+    }
+
+    fn merge(&mut self, other: &Self) {
+        for (name, type_id) in &other.type_registry {
+            self.type_registry.insert(*name, *type_id);
+        }
+        for (name, factory) in &other.entries {
+            self.entries.insert(*name, factory.clone());
+        }
+        for (name, factory) in &other.resource_entries {
+            self.resource_entries.insert(*name, factory.clone());
+        }
+    }
 }
 
 impl SnapshotRegistry {
