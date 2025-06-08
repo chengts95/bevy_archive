@@ -4,7 +4,7 @@ use bevy_ecs::{component::ComponentId, prelude::*};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::ptr::NonNull;
-
+pub mod codec;
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
 pub type CompIdFn = fn(&World) -> Option<ComponentId>;
