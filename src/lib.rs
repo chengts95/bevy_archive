@@ -8,6 +8,8 @@ pub mod flecs_archsnaphot;
 #[cfg(feature = "flecs")]
 pub mod flecs_registry;
 
+#[cfg(feature = "arrow_rs")]
+pub mod arrow_archive;
 pub mod prelude {
     pub use crate::aurora_archive::*;
     pub use crate::bevy_registry::*;

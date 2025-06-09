@@ -8,7 +8,6 @@ use serde_arrow::marrow::datatypes::Field;
 use serde_arrow::schema::SchemaLike;
 use serde_arrow::schema::TracingOptions;
 use serde_json::Value;
-use std::ptr::NonNull;
 pub type ArrExportFn = fn(&Vec<Field>, &World, &[Entity]) -> Result<ArrowColumn, String>;
 pub type ArrImportFn = fn(&Vec<Field>, &ArrowColumn, &mut World, &[Entity]) -> Result<(), String>;
 
@@ -23,6 +22,7 @@ pub struct ArrowColumn {
     pub fields: Vec<Field>,
     pub data: Vec<Array>,
 }
+
 #[derive(Clone)]
 pub struct RawTData {
     pub comp_id: ComponentId,
@@ -50,6 +50,12 @@ pub struct ArrowSnapshotExtension {
     pub schema: Vec<Field>,
 }
 impl ArrowColumn {
+        pub fn to_arrow(&self) -> Result<Vec<T>, String>
+
+    {
+        let mut a = serde_arrow::ArrayBuilder::from_marrow(&self.fields).unwrap();
+
+    }
     pub fn to_vec<T>(&self) -> Result<Vec<T>, String>
     where
         T: for<'de> Deserialize<'de>,
@@ -137,7 +143,7 @@ macro_rules! gen_import {
     (placeholder,$t:ty) => {
         |fields, arr, world, entities| {
             let d = arr.data.iter().map(|x| x.as_view()).collect::<Vec<_>>();
-            let batch: Vec<T> = serde_arrow::from_marrow(&fields, &d).unwrap();
+            let batch: Vec<$t> = serde_arrow::from_marrow(&fields, &d).unwrap();
             let batch = entities
                 .iter()
                 .zip(batch.iter().map(|_| T::default()))
@@ -162,6 +168,31 @@ macro_rules! gen_import {
 impl DefaultSchema for Vec<Field> {}
 
 impl ArrowSnapshotExtension {
+    pub fn new_with_wrapper<T, T1>() -> Self
+    where
+        T: Component,
+        T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
+    {
+        let schema = Vec::<Field>::default_schema::<T1>();
+        let arr_export = build_export_wrapper::<T, T1>();
+        let arr_import: ArrImportFn = |fields, arr, world, entities| {
+            let d = arr.data.iter().map(|x| x.as_view()).collect::<Vec<_>>();
+            let batch: Vec<T1> = serde_arrow::from_marrow(&fields, &d).unwrap();
+            let batch = entities
+                .iter()
+                .zip(batch.into_iter())
+                .map(|(a, b)| (*a, Into::<T>::into(b)));
+            world.insert_batch(batch);
+
+            Ok(())
+        };
+
+        ArrowSnapshotExtension {
+            arr_export,
+            arr_import,
+            schema,
+        }
+    }
     pub fn new_full<T>() -> Self
     where
         T: Serialize + DeserializeOwned + Component,
@@ -199,6 +230,25 @@ impl ArrowSnapshotExtension {
             schema,
         }
     }
+}
+fn build_export_wrapper<T, T1>() -> ArrExportFn
+where
+    T: Component,
+    T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
+{
+    let arr_export: ArrExportFn = |fields, world, entities| {
+        let v: Vec<T1> = entities
+            .iter()
+            .map(|x| T1::from(world.get::<T>(*x).unwrap()))
+            .collect();
+        let data = serde_arrow::to_marrow(&fields, v).unwrap();
+        Ok(ArrowColumn {
+            fields: fields.clone(),
+            data: data,
+        })
+    };
+    
+    arr_export
 }
 
 fn build_export<T>(mode: SnapshotMode) -> ArrExportFn
