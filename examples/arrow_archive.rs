@@ -1,8 +1,10 @@
 //! Basic example for the entity_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
 
+use base64::Engine;
 use bevy_archive::prelude::{vec_snapshot_factory::JsonConversion, *};
 use bevy_ecs::{component::ComponentId, prelude::*};
+use parquet::arrow::ArrowWriter;
 use serde::{Deserialize, Serialize};
 use serde_arrow::{
     marrow::{
@@ -183,16 +185,25 @@ fn main() {
             y: (i * 2) as f32,
         })
         .collect();
-    world.spawn_batch(batch);
+    let batch_vel: Vec<Velocity> = (0..10)
+        .map(|i| Velocity {
+            dx: (i + 1) as f32,
+            dy: (i * 4) as f32,
+        })
+        .collect();
+    world.spawn_batch(batch.into_iter().zip(batch_vel.into_iter()));
     let fields = Vec::<datatypes::Field>::from_type::<Position>(TracingOptions::default()).unwrap();
-    println!("{:?}", fields);
+    let v_fields =
+        Vec::<datatypes::Field>::from_type::<Velocity>(TracingOptions::default()).unwrap();
+   
     let mut registry = SnapshotRegistry::default();
     registry.register::<Position>();
     registry.register::<Velocity>();
     registry.register::<Test>();
     let mut q = world.query::<&Position>();
+    let mut q2 = world.query::<&Velocity>();
     let v: Vec<_> = q.iter(&world).collect();
-
+    let vv: Vec<_> = q2.iter(&world).collect();
     let arrays = serde_arrow::to_marrow(&fields, v).unwrap();
     let d = arrays.iter().map(|x| x.as_view()).collect::<Vec<_>>();
     let batch: Vec<Position> = serde_arrow::from_marrow(&fields, &d).unwrap();
@@ -204,5 +215,11 @@ fn main() {
     .to_json::<Position>()
     .unwrap();
     let batch = ArrowColumn::from_json::<Position>(batch_j, Some(&f2)).unwrap();
-    println!("{:?}", batch_j);
+    let batch = batch.to_arrow().unwrap();
+    let mut buffer = Vec::new();
+    let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    println!("{:?}", base64::prelude::BASE64_STANDARD.encode(&buffer));
 }

@@ -1,6 +1,13 @@
+use std::error::Error;
+use std::sync::Arc;
+
+use arrow::array::RecordBatch;
+use arrow::error::ArrowError;
 use bevy_ecs::ptr::OwningPtr;
 use bevy_ecs::{component::ComponentId, prelude::*};
 
+use parquet::arrow::ArrowWriter;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_arrow::marrow::array::Array;
@@ -50,12 +57,58 @@ pub struct ArrowSnapshotExtension {
     pub schema: Vec<Field>,
 }
 impl ArrowColumn {
-        pub fn to_arrow(&self) -> Result<Vec<T>, String>
+    pub fn to_arrow(&self) -> Result<RecordBatch, Box<dyn std::error::Error>> {
+        // Build the record batch
+        let arrow_fields = self
+            .fields
+            .iter()
+            .map(arrow::datatypes::Field::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
 
-    {
-        let mut a = serde_arrow::ArrayBuilder::from_marrow(&self.fields).unwrap();
+        let arrow_arrays = self
+            .data
+            .clone()
+            .into_iter()
+            .map(arrow::array::ArrayRef::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
 
+        let record_batch = arrow::array::RecordBatch::try_new(
+            Arc::new(arrow::datatypes::Schema::new(arrow_fields)),
+            arrow_arrays,
+        );
+        Ok(record_batch?)
     }
+    pub fn to_parquet(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let batch = self.to_arrow()?;
+        let mut buffer = Vec::new();
+        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None)?;
+        writer.write(&batch)?;
+        writer.close()?;
+        Ok(buffer)
+    }
+    // pub fn parse_parquet<T>(v: &[u8]) -> Result<Vec<T>, Box<dyn std::error::Error>>
+    // where
+    //     T: for<'de> Deserialize<'de>,
+    // {
+    //     let parquet_reader = ParquetRecordBatchReaderBuilder::try_new(v)?
+    //         .with_batch_size(8192)
+    //         .build()?;
+    //     let mut batches = Vec::new();
+
+    //     for batch in parquet_reader {
+    //         batches.push(batch?);
+    //     }
+    //     let d = batches[0];
+    //     let d: Vec<T> = serde_arrow::from_record_batch(&d)?;
+    //     // let fields = schema
+    //     //     .fields()
+    //     //     .iter()
+    //     //     .map(serde_arrow::marrow::datatypes::Field::try_from)
+    //     //     .collect::<Result<Vec<_>, _>>()?;
+
+    //     Ok(d)
+    // }
+ 
     pub fn to_vec<T>(&self) -> Result<Vec<T>, String>
     where
         T: for<'de> Deserialize<'de>,
@@ -247,7 +300,7 @@ where
             data: data,
         })
     };
-    
+
     arr_export
 }
 
