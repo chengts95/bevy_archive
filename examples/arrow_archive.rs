@@ -1,19 +1,36 @@
 //! Basic example for the entity_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
 
+use arrow::{
+    array::{ArrayRef, RecordBatch},
+    datatypes::{Fields, Schema},
+    record_batch,
+};
 use base64::Engine;
 use bevy_archive::prelude::{vec_snapshot_factory::JsonConversion, *};
-use bevy_ecs::{component::ComponentId, prelude::*};
-use parquet::arrow::ArrowWriter;
+use bevy_ecs::{component::ComponentId, prelude::*, storage::Column};
+use parquet::arrow::{
+    ArrowWriter,
+    arrow_reader::{ArrowReaderBuilder, ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder},
+};
 use serde::{Deserialize, Serialize};
 use serde_arrow::{
     marrow::{
+        self,
         array::{Array, NullArray},
         datatypes::Field,
     },
     schema::{SchemaLike, TracingOptions},
 };
-use std::{any::TypeId, collections::HashMap, fs, path::PathBuf, str::FromStr};
+use std::{
+    any::TypeId,
+    collections::{BTreeMap, HashMap},
+    fs,
+    marker::PhantomData,
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
 
 // === Test Components ===
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -175,51 +192,153 @@ use bevy_archive::bevy_registry::vec_snapshot_factory::*;
 struct Test {
     pub v: Vec<i32>,
 }
+#[derive(Debug, Default, Clone)]
+struct ComponentTable {
+    name: String,
+    columns: BTreeMap<String, ArrowColumn>,
+    entities: Vec<EntityID>
+}
+impl ComponentTable {
+    pub fn to_record_batch(&self) -> Result<RecordBatch, Box<dyn std::error::Error>> {
+        let mut fields = Vec::new();
+        let mut arrays = Vec::new();
+        let mut metadata = HashMap::new();
+        let ent = ArrowColumn::from_slice(&self.entities).unwrap();
+         metadata.insert("id".to_string(), "id".to_string());
+           for f in &ent.fields {
+         fields.push(arrow::datatypes::Field::try_from( f)?);
+         arrays.extend(ent.data.clone().into_iter().map(arrow::array::ArrayRef::try_from) .collect::<Result<Vec<_>, _>>()?);
+           }
+        for (type_name, col) in &self.columns {
+            for f in &col.fields {
+                let mut f = f.clone();
+                if f.name == "" {
+                    f.name = format!(" {}", type_name);
+                } else {
+                    f.name = format!("{}.{}", type_name, f.name);
+                }
+
+                metadata.insert(type_name.to_owned(), f.name.to_owned());
+                fields.push(arrow::datatypes::Field::try_from(&f)?);
+            }
+
+            let arrow_arrays = col
+                .data
+                .clone()
+                .into_iter()
+                .map(arrow::array::ArrayRef::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+            arrays.extend(arrow_arrays);
+        }
+        let schema = arrow::datatypes::Schema::new(fields);
+
+        let schema = schema.with_metadata(metadata);
+        let record_batch = arrow::array::RecordBatch::try_new(Arc::new(schema), arrays);
+        Ok(record_batch?)
+    }
+}
+impl ComponentTable {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string();
+    }
+    pub fn insert_column(&mut self, name: &str, column: ArrowColumn) {
+        self.columns.insert(name.to_string(), column);
+    }
+    pub fn remove_column(&mut self, name: &str) {
+        self.columns.remove(name);
+    }
+    pub fn get_column_mut(&mut self, name: &str) -> Option<&mut ArrowColumn> {
+        self.columns.get_mut(name)
+    }
+    pub fn get_column(&self, name: &str) -> Option<&ArrowColumn> {
+        self.columns.get(name)
+    }
+}
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct EntityID {
+    id: u32,
+}
 fn main() {
+    use base64::prelude::BASE64_STANDARD;
     use serde_arrow::marrow::datatypes;
-    test_roundtrip_with_children();
+    use serde_arrow::schema::TracingOptions;
+    use serde_arrow::{from_marrow, to_marrow};
+
+    // 初始化世界和组件数据
     let mut world = World::new();
-    let batch: Vec<Position> = (0..10)
+    let positions: Vec<Position> = (0..10)
         .map(|i| Position {
             x: i as f32,
             y: (i * 2) as f32,
         })
         .collect();
-    let batch_vel: Vec<Velocity> = (0..10)
+    let velocities: Vec<Velocity> = (0..10)
         .map(|i| Velocity {
             dx: (i + 1) as f32,
             dy: (i * 4) as f32,
         })
         .collect();
-    world.spawn_batch(batch.into_iter().zip(batch_vel.into_iter()));
-    let fields = Vec::<datatypes::Field>::from_type::<Position>(TracingOptions::default()).unwrap();
-    let v_fields =
+
+    // 批量生成实体
+    world.spawn_batch(positions.into_iter().zip(velocities.into_iter()));
+
+    // 获取字段定义
+    let pos_fields =
+        Vec::<datatypes::Field>::from_type::<Position>(TracingOptions::default()).unwrap();
+    let vel_fields =
         Vec::<datatypes::Field>::from_type::<Velocity>(TracingOptions::default()).unwrap();
-   
+
+    // 注册组件类型
     let mut registry = SnapshotRegistry::default();
     registry.register::<Position>();
     registry.register::<Velocity>();
     registry.register::<Test>();
-    let mut q = world.query::<&Position>();
-    let mut q2 = world.query::<&Velocity>();
-    let v: Vec<_> = q.iter(&world).collect();
-    let vv: Vec<_> = q2.iter(&world).collect();
-    let arrays = serde_arrow::to_marrow(&fields, v).unwrap();
-    let d = arrays.iter().map(|x| x.as_view()).collect::<Vec<_>>();
-    let batch: Vec<Position> = serde_arrow::from_marrow(&fields, &d).unwrap();
-    let f2 = fields.clone();
-    let batch_j = &ArrowColumn {
-        fields,
-        data: arrays,
-    }
-    .to_json::<Position>()
-    .unwrap();
-    let batch = ArrowColumn::from_json::<Position>(batch_j, Some(&f2)).unwrap();
-    let batch = batch.to_arrow().unwrap();
-    let mut buffer = Vec::new();
-    let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None).unwrap();
-    writer.write(&batch).unwrap();
-    writer.close().unwrap();
 
-    println!("{:?}", base64::prelude::BASE64_STANDARD.encode(&buffer));
+    // 查询组件数据
+    let pos_data: Vec<_> = world.query::<&Position>().iter(&world).collect();
+    // 序列化为 Arrow 格式
+    let arrays = to_marrow(&pos_fields, pos_data).unwrap();
+    let vel_data: Vec<_> = world.query::<&Velocity>().iter(&world).collect();
+    let entities: Vec<_> = world
+        .iter_entities()
+        .map(|x| EntityID { id: x.id().index() })
+        .collect();
+    // 序列化为 Arrow 格式
+    let v_arrays = to_marrow(&vel_fields, vel_data).unwrap();
+    let mut e = Field::default();
+    e.data_type = marrow::datatypes::DataType::Int32;
+    e.name = String::from("id");
+
+ 
+    let arrow_column = ArrowColumn {
+        fields: pos_fields.clone(),
+        data: arrays.clone(),
+    };
+    let v_arrow_column = ArrowColumn {
+        fields: vel_fields.clone(),
+        data: v_arrays.clone(),
+    };
+
+    let mut table = ComponentTable::default();
+
+    table.insert_column("Position", arrow_column);
+    table.insert_column("Velocity", v_arrow_column);
+    table.entities.extend_from_slice(&entities);
+    let record_batch = table.to_record_batch().unwrap();
+    
+    let buffer = std::io::stdout();
+    let data = arrow::csv::WriterBuilder::new();
+    let data = data.with_header(true);
+    let mut w = data.build(buffer);
+    let _ = w.write(&record_batch);
+
+    // let mut buffer = Vec::new();
+    // let mut writer = ArrowWriter::try_new(&mut buffer, record_batch.schema(), None).unwrap();
+    // writer.write(&record_batch).unwrap();
+    // writer.close().unwrap();
+
+    // println!("{}", BASE64_STANDARD.encode(&buffer));
 }
