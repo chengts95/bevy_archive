@@ -348,6 +348,7 @@ dependencies = [
  "bevy_ecs",
  "bimap",
  "bumpalo",
+ "bytes",
  "csv",
  "flecs_ecs",
  "parquet",

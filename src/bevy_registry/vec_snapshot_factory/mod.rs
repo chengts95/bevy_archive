@@ -1,33 +1,32 @@
 use std::error::Error;
 use std::sync::Arc;
 
-use arrow::array::RecordBatch;
+use arrow::array::{ArrayRef, RecordBatch};
 use arrow::error::ArrowError;
 use bevy_ecs::ptr::OwningPtr;
 use bevy_ecs::{component::ComponentId, prelude::*};
 
+use arrow::datatypes::{Field, FieldRef};
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_arrow::marrow::array::Array;
-use serde_arrow::marrow::datatypes::Field;
 use serde_arrow::schema::SchemaLike;
 use serde_arrow::schema::TracingOptions;
 use serde_json::Value;
-pub type ArrExportFn = fn(&Vec<Field>, &World, &[Entity]) -> Result<ArrowColumn, String>;
-pub type ArrImportFn = fn(&Vec<Field>, &ArrowColumn, &mut World, &[Entity]) -> Result<(), String>;
+pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn, String>;
+pub type ArrImportFn = fn(&[FieldRef], &ArrowColumn, &mut World, &[Entity]) -> Result<(), String>;
 
 pub type ArrDynFn =
-    fn(&Vec<Field>, &ArrowColumn, &mut World, &[Entity]) -> Result<RawTData, String>;
+    fn(&[FieldRef], &ArrowColumn, &mut World, &[Entity]) -> Result<RawTData, String>;
 
 pub type ArrowToJsonFn = fn(&ArrowColumn) -> Result<Vec<serde_json::Value>, String>;
-pub type JsonToArrowFn = fn(&Vec<Field>, &Vec<serde_json::Value>) -> Result<ArrowColumn, String>;
+pub type JsonToArrowFn = fn(&[FieldRef], &Vec<serde_json::Value>) -> Result<ArrowColumn, String>;
 
 #[derive(Default, Clone, Debug)]
 pub struct ArrowColumn {
-    pub fields: Vec<Field>,
-    pub data: Vec<Array>,
+    pub fields: Vec<FieldRef>,
+    pub data: Vec<ArrayRef>,
 }
 
 #[derive(Clone)]
@@ -54,23 +53,14 @@ pub enum SnapshotMode {
 pub struct ArrowSnapshotExtension {
     pub arr_export: ArrExportFn,
     pub arr_import: ArrImportFn,
-    pub schema: Vec<Field>,
+    pub schema: Vec<FieldRef>,
 }
 impl ArrowColumn {
     pub fn to_arrow(&self) -> Result<RecordBatch, Box<dyn std::error::Error>> {
         // Build the record batch
-        let arrow_fields = self
-            .fields
-            .iter()
-            .map(arrow::datatypes::Field::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
+        let arrow_fields = self.fields.clone();
 
-        let arrow_arrays = self
-            .data
-            .clone()
-            .into_iter()
-            .map(arrow::array::ArrayRef::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
+        let arrow_arrays = self.data.clone();
 
         let record_batch = arrow::array::RecordBatch::try_new(
             Arc::new(arrow::datatypes::Schema::new(arrow_fields)),
@@ -108,19 +98,19 @@ impl ArrowColumn {
 
     //     Ok(d)
     // }
- 
+
     pub fn to_vec<T>(&self) -> Result<Vec<T>, String>
     where
         T: for<'de> Deserialize<'de>,
     {
-        let d: Vec<_> = self.data.iter().map(|x| x.as_view()).collect();
-        serde_arrow::from_marrow(&self.fields, &d).map_err(|e| e.to_string())
+    
+        serde_arrow::from_arrow(&self.fields, &self.data).map_err(|e| e.to_string())
     }
-    pub fn from_slice_option<T>(v: &[T], fields: &[Field]) -> Result<Self, String>
+    pub fn from_slice_option<T>(v: &[T], fields: &[FieldRef]) -> Result<Self, String>
     where
         T: for<'de> Deserialize<'de> + Serialize,
     {
-        let data = serde_arrow::to_marrow(&fields, v).unwrap();
+        let data = serde_arrow::to_arrow(&fields, v).unwrap();
         Ok(Self {
             fields: fields.to_vec(),
             data,
@@ -131,13 +121,13 @@ impl ArrowColumn {
         T: for<'de> Deserialize<'de> + Serialize,
     {
         let fields = Vec::from_type::<T>(TracingOptions::default()).unwrap();
-        let data = serde_arrow::to_marrow(&fields, v).unwrap();
+        let data = serde_arrow::to_arrow(&fields, v).unwrap();
         Ok(Self { fields, data })
     }
 }
 
 pub trait JsonConversion {
-    fn from_json<T>(json: &Vec<Value>, fields: Option<&[Field]>) -> Result<Self, String>
+    fn from_json<T>(json: &Vec<Value>, fields: Option<&[FieldRef]>) -> Result<Self, String>
     where
         T: for<'de> Deserialize<'de> + Serialize,
         Self: Sized;
@@ -146,12 +136,12 @@ pub trait JsonConversion {
         T: for<'de> Deserialize<'de> + Serialize;
 }
 impl JsonConversion for ArrowColumn {
-    fn from_json<T>(json: &Vec<Value>, fields: Option<&[Field]>) -> Result<Self, String>
+    fn from_json<T>(json: &Vec<Value>, fields: Option<&[FieldRef]>) -> Result<Self, String>
     where
         T: for<'de> Deserialize<'de> + Serialize,
         Self: Sized,
     {
-        let binding = Vec::<Field>::default_schema::<T>();
+        let binding = Vec::<FieldRef>::default_schema::<T>();
         let fields = fields.unwrap_or(&binding);
         let data: Vec<T> =
             serde_json::from_value::<Vec<T>>(serde_json::Value::Array(json.to_vec()))
@@ -173,10 +163,10 @@ impl JsonConversion for ArrowColumn {
     }
 }
 trait DefaultSchema {
-    fn default_schema<'de, T: Deserialize<'de>>() -> Vec<Field> {
+    fn default_schema<'de, T: Deserialize<'de>>() -> Vec<FieldRef> {
         Vec::from_type::<T>(TracingOptions::default()).unwrap()
     }
-    fn default_null_schema<'de, T: Deserialize<'de>>() -> Vec<Field> {
+    fn default_null_schema<'de, T: Deserialize<'de>>() -> Vec<FieldRef> {
         let a = TracingOptions::default();
         Vec::from_type::<T>(a.allow_null_fields(true)).unwrap()
     }
@@ -185,8 +175,8 @@ trait DefaultSchema {
 macro_rules! gen_import {
     (full,$t:ty) => {
         |fields, arr, world, entities| {
-            let d = arr.data.iter().map(|x| x.as_view()).collect::<Vec<_>>();
-            let batch: Vec<$t> = serde_arrow::from_marrow(&fields, &d).unwrap();
+            let d = arr.data.as_slice();
+            let batch: Vec<$t> = serde_arrow::from_arrow(&fields, &d).unwrap();
             let batch = entities.iter().zip(batch.into_iter()).map(|(a, b)| (*a, b));
             world.insert_batch(batch);
 
@@ -195,8 +185,8 @@ macro_rules! gen_import {
     };
     (placeholder,$t:ty) => {
         |fields, arr, world, entities| {
-            let d = arr.data.iter().map(|x| x.as_view()).collect::<Vec<_>>();
-            let batch: Vec<$t> = serde_arrow::from_marrow(&fields, &d).unwrap();
+            let d = arr.data.as_slice();
+            let batch: Vec<$t> = serde_arrow::from_arrow(&fields, &d).unwrap();
             let batch = entities
                 .iter()
                 .zip(batch.iter().map(|_| T::default()))
@@ -208,8 +198,8 @@ macro_rules! gen_import {
     };
     (emplace, $t:ty) => {
         |fields, arr, world, entities| {
-            let d = arr.data.iter().map(|x| x.as_view()).collect::<Vec<_>>();
-            let batch: Vec<$t> = serde_arrow::from_marrow(&fields, &d).unwrap();
+            let d = arr.data.as_slice();
+            let batch: Vec<$t> = serde_arrow::from_arrow(&fields, &d).unwrap();
             let batch = entities.iter().zip(batch.into_iter()).map(|(a, b)| (*a, b));
             world.insert_batch_if_new(batch);
 
@@ -218,7 +208,7 @@ macro_rules! gen_import {
     };
 }
 
-impl DefaultSchema for Vec<Field> {}
+impl DefaultSchema for Vec<FieldRef> {}
 
 impl ArrowSnapshotExtension {
     pub fn new_with_wrapper<T, T1>() -> Self
@@ -226,11 +216,11 @@ impl ArrowSnapshotExtension {
         T: Component,
         T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
     {
-        let schema = Vec::<Field>::default_schema::<T1>();
+        let schema = Vec::<FieldRef>::default_schema::<T1>();
         let arr_export = build_export_wrapper::<T, T1>();
         let arr_import: ArrImportFn = |fields, arr, world, entities| {
-            let d = arr.data.iter().map(|x| x.as_view()).collect::<Vec<_>>();
-            let batch: Vec<T1> = serde_arrow::from_marrow(&fields, &d).unwrap();
+            let d = &arr.data;
+            let batch: Vec<T1> = serde_arrow::from_arrow(&fields, &d).unwrap();
             let batch = entities
                 .iter()
                 .zip(batch.into_iter())
@@ -250,7 +240,7 @@ impl ArrowSnapshotExtension {
     where
         T: Serialize + DeserializeOwned + Component,
     {
-        let schema = Vec::<Field>::default_schema::<T>();
+        let schema = Vec::<FieldRef>::default_schema::<T>();
         let arr_export = build_export::<T>(SnapshotMode::Full);
         let arr_import: ArrImportFn = gen_import!(full, T);
         ArrowSnapshotExtension {
@@ -264,10 +254,10 @@ impl ArrowSnapshotExtension {
         T: Serialize + DeserializeOwned + Component + Default,
     {
         let schema = match mode {
-            SnapshotMode::Full => Vec::<Field>::default_schema::<T>(),
-            SnapshotMode::Placeholder => Vec::<Field>::default_null_schema::<()>(),
+            SnapshotMode::Full => Vec::<FieldRef>::default_schema::<T>(),
+            SnapshotMode::Placeholder => Vec::<FieldRef>::default_null_schema::<()>(),
             SnapshotMode::PlaceholderEmplaceIfNotExists => {
-                Vec::<Field>::default_null_schema::<()>()
+                Vec::<FieldRef>::default_null_schema::<()>()
             }
         };
         let arr_export = build_export::<T>(mode);
@@ -294,9 +284,9 @@ where
             .iter()
             .map(|x| T1::from(world.get::<T>(*x).unwrap()))
             .collect();
-        let data = serde_arrow::to_marrow(&fields, v).unwrap();
+        let data = serde_arrow::to_arrow(&fields, v).unwrap();
         Ok(ArrowColumn {
-            fields: fields.clone(),
+            fields: fields.to_vec(),
             data: data,
         })
     };
@@ -314,17 +304,17 @@ where
                 .iter()
                 .map(|x| world.get::<T>(*x).unwrap())
                 .collect();
-            let data = serde_arrow::to_marrow(&fields, v).unwrap();
+            let data = serde_arrow::to_arrow(&fields, v).unwrap();
             Ok(ArrowColumn {
-                fields: fields.clone(),
+                fields: fields.to_vec(),
                 data: data,
             })
         },
         _ => |fields, _world, entities| {
             let v: Vec<()> = entities.iter().map(|_x| ()).collect();
-            let data = serde_arrow::to_marrow(&fields, v).unwrap();
+            let data = serde_arrow::to_arrow(&fields, v).unwrap();
             Ok(ArrowColumn {
-                fields: fields.clone(),
+                fields: fields.to_vec(),
                 data: data,
             })
         },
