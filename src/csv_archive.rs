@@ -16,7 +16,7 @@ pub struct ComponentColumnGroup {
     pub fields: Vec<String>, // ["TestComponentA.value"]
 }
 
-#[derive(Debug,Serialize,Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ColumnarCsv {
     pub headers: Vec<String>,
     pub columns: Vec<Vec<serde_json::Value>>,

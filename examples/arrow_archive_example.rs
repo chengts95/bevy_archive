@@ -1,14 +1,13 @@
 //! Basic example for the entity_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
 
-use arrow::{
-    array::RecordBatch,
-    compute::concat_batches,
-    datatypes::{FieldRef, Schema},
-};
-use bevy_archive::prelude::*;
+
+use bevy_archive::{arrow_archive::{ComponentTable, EntityID}, prelude::*};
 use bevy_ecs::prelude::*;
-use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder};
+use parquet::{
+    arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder},
+    file::reader::ChunkReader,
+};
 use serde::{Deserialize, Serialize};
 use serde_arrow::{
     marrow::{self, datatypes::Field},
@@ -182,78 +181,7 @@ use bevy_archive::bevy_registry::vec_snapshot_factory::*;
 struct Test {
     pub v: Vec<i32>,
 }
-#[derive(Debug, Default, Clone)]
-struct ComponentTable {
-    name: String,
-    columns: BTreeMap<String, ArrowColumn>,
-    entities: Vec<EntityID>,
-}
-impl ComponentTable {
-    pub fn to_record_batch(&self) -> Result<RecordBatch, Box<dyn std::error::Error>> {
-        let mut fields = Vec::new();
-        let mut arrays = Vec::new();
-        let mut type_map = HashMap::new();
-        let ent = ArrowColumn::from_slice(&self.entities).unwrap();
-        type_map.insert("id".to_string(), vec!["id".to_string()]);
-        for f in &ent.fields {
-            fields.push(f.clone());
-            arrays.extend(ent.data.clone());
-        }
-        for (type_name, col) in &self.columns {
-            let mut str_fields = Vec::with_capacity(col.fields.len());
-            for f in &col.fields {
-                let mut meta = f.metadata().clone();
-                let mut f = (**f).clone();
 
-                if f.name() == "" {
-                    f = f.with_name(format!("{}", type_name));
-                } else {
-                    let name = format!("{}.{}", type_name, f.name());
-                    f = f.with_name(name);
-                    meta.insert("prefix".to_string(), type_name.clone());
-                }
-
-                str_fields.push(f.name().to_owned());
-                fields.push(Arc::new(f.with_metadata(meta)));
-            }
-            type_map.insert(type_name.to_owned(), str_fields);
-            let arrow_arrays = col.data.clone();
-            arrays.extend(arrow_arrays);
-        }
-        let mut schema = arrow::datatypes::Schema::new(fields);
-
-        schema.metadata.insert(
-            "type_mapping".to_string(),
-            serde_json::to_string(&type_map)?,
-        );
-        let record_batch = arrow::array::RecordBatch::try_new(Arc::new(schema), arrays);
-        Ok(record_batch?)
-    }
-}
-impl ComponentTable {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    pub fn set_name(&mut self, name: &str) {
-        self.name = name.to_string();
-    }
-    pub fn insert_column(&mut self, name: &str, column: ArrowColumn) {
-        self.columns.insert(name.to_string(), column);
-    }
-    pub fn remove_column(&mut self, name: &str) {
-        self.columns.remove(name);
-    }
-    pub fn get_column_mut(&mut self, name: &str) -> Option<&mut ArrowColumn> {
-        self.columns.get_mut(name)
-    }
-    pub fn get_column(&self, name: &str) -> Option<&ArrowColumn> {
-        self.columns.get(name)
-    }
-}
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-struct EntityID {
-    id: u32,
-}
 fn main() {
     use arrow::datatypes;
     use base64::prelude::BASE64_STANDARD;
@@ -324,60 +252,13 @@ fn main() {
     table.insert_column("Position", arrow_column);
     table.insert_column("Velocity", v_arrow_column);
     table.entities.extend_from_slice(&entities);
-    let record_batch = table.to_record_batch().unwrap();
+    let _record_batch = table.to_record_batch().unwrap();
 
-    let buffer = Cursor::new(Vec::new());
+    // let csv = table.to_csv().unwrap();
+    // println!("{ }", csv);
+    let parquet = table.to_parquet().unwrap();
+    let new_table = ComponentTable::from_parquet_u8(&parquet).unwrap();
 
-    let data = arrow::csv::WriterBuilder::new();
-    let data = data.with_header(true);
-    let mut w = data.build(buffer);
-    let _ = w.write(&record_batch);
-    let buffer = w.into_inner();
-    println!("{}", String::from_utf8(buffer.into_inner()).unwrap());
-    let mut buffer = Vec::new();
-    let mut writer = ArrowWriter::try_new(&mut buffer, record_batch.schema(), None).unwrap();
-    writer.write(&record_batch).unwrap();
-    writer.close().unwrap();
-
-    let buffer_bytes = bytes::Bytes::from_owner(buffer);
-    let parquet_reader = ParquetRecordBatchReaderBuilder::try_new(buffer_bytes)
-        .unwrap()
-        .with_batch_size(8192)
-        .build()
-        .unwrap();
-    let batches: Vec<_> = parquet_reader.map(|x| x.unwrap()).collect();
-    println!("{:?}", batches[0].schema().metadata());
-    let batches = concat_batches(&batches[0].schema(), &batches).unwrap();
-    let mut new_table = ComponentTable::default();
-    println!("{:?}", batches.schema().metadata());
-    //let d: Vec<Position> = serde_arrow::from_record_batch(&batches).unwrap();
-    let fields = batches.schema().fields().clone();
-
-    let schema = batches.schema();
-    let mut table_builder = HashMap::new();
-    for i in fields.iter() {
-        let data_type = i.metadata().get("prefix").map_or(i.name(), |v| v);
-
-        let data = table_builder.entry(data_type).or_insert(Vec::new());
-        let a = batches.column_by_name(i.name()).unwrap();
-        let final_name = i
-            .name()
-            .strip_prefix(format!("{}.", data_type).as_str())
-            .unwrap_or(i.name());
-        let field = (**i).clone().with_name(final_name);
-        data.push((Arc::new(field), a.clone()));
-    }
-    for (name, data) in table_builder {
-        let arr = ArrowColumn {
-            fields: data.iter().map(|(a, _)| a.clone()).collect(),
-            data: data.iter().map(|(_, b)| b.clone()).collect(),
-        };
-        if name == "id" {
-            new_table.entities = arr.to_vec().unwrap();
-        } else {
-            new_table.insert_column(name, arr);
-        }
-    }
     println!("{ }", new_table.entities.len());
     let d = new_table.get_column("Position").unwrap();
 
