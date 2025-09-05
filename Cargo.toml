@@ -13,7 +13,7 @@ categories = ["data-structures"]
 name = "cross_ecs"
 required-features = ["flecs"]
 [[example]]
-name = "arrow_archive"
+name = "arrow_archive_example"
 required-features = ["arrow_rs"]
 
 [features]

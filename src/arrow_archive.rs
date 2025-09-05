@@ -68,12 +68,7 @@ impl ComponentTable {
     }
 }
 impl ComponentTable {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    pub fn set_name(&mut self, name: &str) {
-        self.name = name.to_string();
-    }
+ 
     pub fn insert_column(&mut self, name: &str, column: ArrowColumn) {
         self.columns.insert(name.to_string(), column);
     }

@@ -234,7 +234,7 @@ fn main() {
         .collect();
     // 序列化为 Arrow 格式
     let v_arrays = to_arrow(&vel_fields, vel_data).unwrap();
-    let mut e = Field::default();
+    let mut e = Field::default(); 
     e.data_type = marrow::datatypes::DataType::Int32;
     e.name = String::from("id");
 
