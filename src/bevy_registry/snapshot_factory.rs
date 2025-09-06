@@ -50,7 +50,7 @@ macro_rules! gen_import {
     };
     (placeholder,$t:ty) => {
         |_, world, entity| {
-            world.entity_mut(entity).insert(T::default());
+            world.entity_mut(entity).insert(<$t>::default());
             Ok(())
         }
     };

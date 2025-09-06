@@ -53,14 +53,14 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
     let (map, _exclude) = derive_type_mapping_cache(&reg, &world); // do not want meta by default
 
     world.defer_begin();
-    for i in all_entities {
-        EntityView::new_from(world, *i).add::<SerializeTarget>();
-    }
+    // for i in all_entities {
+    //     EntityView::new_from(world, *i).add::<SerializeTarget>();
+    // }
     world.defer_end();
 
     let mut archs = vec![];
 
-    world.query::<&SerializeTarget>().build().run_iter(|it, _| {
+    world.query::<()>().with::<flecs::Wildcard>().build().run_iter(|it, _| {
         if it.count() <= 0 {
             return;
         }
@@ -104,7 +104,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
     });
 
     world_snapshot.archetypes.extend(archs);
-    world.remove_all::<SerializeTarget>();
+    //world.remove_all::<SerializeTarget>();
     world.remove_all::<NameID>();
     world_snapshot
 }
