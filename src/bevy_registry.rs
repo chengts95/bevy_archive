@@ -95,35 +95,6 @@ impl SnapshotMerge for SnapshotRegistry {
 }
 
 impl SnapshotRegistry {
-    pub fn resource_register<T: Resource + Serialize + DeserializeOwned>(&mut self) {
-        let mode = SnapshotMode::Full;
-        let factory = SnapshotFactory {
-            export: |world, _| {
-                world
-                    .get_resource::<T>()
-                    .map(|r| serde_json::to_value(r).unwrap())
-            },
-            import: |value, world, _| match serde_json::from_value::<T>(value.clone()) {
-                Ok(resource) => {
-                    world.insert_resource(resource);
-                    Ok(())
-                }
-                Err(e) => Err(format!("Deserialization error: {}", e)),
-            },
-            dyn_ctor: |val, bump| {
-                let name = short_type_name::<T>();
-                let component: T = serde_json::from_value(val.clone())
-                    .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
-                let ptr = bump.alloc(component) as *mut T;
-                Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
-            },
-            comp_id: |world| world.resource_id::<T>(),
-            register: |world| world.register_resource::<T>(),
-            mode,
-        };
-        self.resource_entries
-            .insert(short_type_name::<T>(), factory);
-    }
     pub fn register<T>(&mut self)
     where
         T: Serialize + DeserializeOwned + Component + 'static,
@@ -180,9 +151,6 @@ impl SnapshotRegistry {
     pub fn get_factory(&self, name: &str) -> Option<&SnapshotFactory> {
         self.entries.get(name)
     }
-    pub fn get_res_factory(&self, name: &str) -> Option<&SnapshotFactory> {
-        self.resource_entries.get(name)
-    }
 
     pub fn comp_id_by_name(&self, name: &str, world: &World) -> Option<ComponentId> {
         self.entries
@@ -199,5 +167,41 @@ impl SnapshotRegistry {
         self.entries
             .get(name)
             .and_then(|entry| (entry.comp_id)(world))
+    }
+}
+
+impl SnapshotRegistry {
+    pub fn get_res_factory(&self, name: &str) -> Option<&SnapshotFactory> {
+        self.resource_entries.get(name)
+    }
+
+    pub fn resource_register<T: Resource + Serialize + DeserializeOwned>(&mut self) {
+        let mode = SnapshotMode::Full;
+        let factory = SnapshotFactory {
+            export: |world, _| {
+                world
+                    .get_resource::<T>()
+                    .map(|r| serde_json::to_value(r).unwrap())
+            },
+            import: |value, world, _| match serde_json::from_value::<T>(value.clone()) {
+                Ok(resource) => {
+                    world.insert_resource(resource);
+                    Ok(())
+                }
+                Err(e) => Err(format!("Deserialization error: {}", e)),
+            },
+            dyn_ctor: |val, bump| {
+                let name = short_type_name::<T>();
+                let component: T = serde_json::from_value(val.clone())
+                    .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
+                let ptr = bump.alloc(component) as *mut T;
+                Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+            },
+            comp_id: |world| world.resource_id::<T>(),
+            register: |world| world.register_resource::<T>(),
+            mode,
+        };
+        self.resource_entries
+            .insert(short_type_name::<T>(), factory);
     }
 }
