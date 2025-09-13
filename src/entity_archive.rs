@@ -48,7 +48,9 @@ pub fn toml_to_json(toml: &TomlValue) -> Result<JsonValue, String> {
 
 pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapshot {
     let mut entities_snapshot = Vec::new();
-    for e in world.iter_entities() {
+    let mut q = 
+        world.try_query::<EntityRef>().expect("Failed to create query"); 
+    for e in q.iter(world) {
         let mut es = EntitySnapshot::default();
         es.id = e.id().index() as u64;
         for key in reg.type_registry.keys() {
@@ -76,7 +78,7 @@ pub fn load_world_snapshot(world: &mut World, snapshot: &WorldSnapshot, reg: &Sn
     world.entities().reserve_entities((max_id + 1) as u32);
     world.flush();
     for e in &snapshot.entities {
-        let entity = Entity::from_raw(e.id as u32);
+        let entity = Entity::from_raw_u32(e.id as u32).unwrap();
         for c in &e.components {
             reg.get_factory(&c.r#type.as_str())
                 .map(|x| x.import)

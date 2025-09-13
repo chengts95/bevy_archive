@@ -1,5 +1,5 @@
 use bevy_ecs::{
-    component::{ComponentId, StorageType},
+    component::{ComponentId, StorageType}, 
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
@@ -148,7 +148,7 @@ pub fn load_world_resource(
         let factory = reg.get_res_factory(res);
         match factory {
             Some(factory) => {
-                (factory.import)(&data[res], world, Entity::from_raw(0)).unwrap();
+                (factory.import)(&data[res], world, Entity::from_raw_u32(0).unwrap()).unwrap();
             }
             None => {
                 //may need to emit warnings here
@@ -163,7 +163,8 @@ pub fn save_world_resource(
     let mut map = HashMap::new();
     let saveable_resource = reg.resource_entries.keys();
     for res in saveable_resource {
-        let value = (reg.get_res_factory(res).unwrap().export)(world, Entity::from_raw(0));
+        let value =
+            (reg.get_res_factory(res).unwrap().export)(world, Entity::from_raw_u32(0).unwrap());
         if let Some(value) = value {
             map.insert(res.to_string(), value);
         }
@@ -172,7 +173,10 @@ pub fn save_world_resource(
 }
 pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldArchSnapshot {
     let mut world_snapshot = WorldArchSnapshot::default();
-    world_snapshot.entities = world.iter_entities().map(|e| e.id().index()).collect();
+    let mut entities = world
+        .try_query::<EntityRef>()
+        .expect("Failed to create query");
+    world_snapshot.entities = entities.iter(world).map(|e| e.id().index()).collect();
     world_snapshot.entities.sort_unstable();
     let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
     let reg_comp_ids: HashMap<ComponentId, &str> = reg
@@ -184,7 +188,8 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
     let snap = archetypes.map(|archetype| {
         let can_be_stored = archetype
             .components()
-            .any(|x| reg_comp_ids.contains_key(&x));
+            .iter()
+            .any(|x| reg_comp_ids.contains_key(x));
         if !can_be_stored {
             return ArchetypeSnapshot::default();
         }
@@ -196,10 +201,10 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
             .collect();
         archetype_snapshot.entities.extend(entities.as_slice());
         let iter = entities;
-        archetype.components().for_each(|x| {
+        archetype.components().iter().for_each(|x| {
             if reg_comp_ids.contains_key(&x) {
                 let type_name = reg_comp_ids[&x];
-                let t = archetype.get_storage_type(x).map(|x| match x {
+                let t = archetype.get_storage_type(*x).map(|x| match x {
                     StorageType::Table => StorageTypeFlag::Table,
                     StorageType::SparseSet => StorageTypeFlag::SparseSet,
                 });
@@ -207,7 +212,8 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                 archetype_snapshot.add_type(type_name, t);
                 let col = archetype_snapshot.get_column_mut(type_name).unwrap();
                 for (idx, &entity) in iter.iter().enumerate() {
-                    let entity = world.entities().resolve_from_id(entity).unwrap();
+                    let entity = Entity::from_raw_u32(entity as u32).unwrap();
+                    let entity = world.entities().resolve_from_id(entity.row()).unwrap();
                     let serialized = f(world, entity).unwrap();
                     col[idx] = serialized;
                 }
@@ -242,7 +248,7 @@ pub fn load_world_arch_snapshot(
             let col = arch.get_column(&type_name).unwrap();
             let un = entities.iter().zip(col.iter());
             for (entity_id, value) in un {
-                let entity = Entity::from_raw(*entity_id);
+                let entity = Entity::from_raw_u32(*entity_id).unwrap();
                 match reg.get_factory(&type_name).map(|x| x.import) {
                     Some(func) => {
                         if let Err(e) = func(value, world, entity) {
@@ -294,8 +300,8 @@ pub fn load_world_arch_snapshot_defragment(
 
         let mut bump = bumpalo::Bump::new();
         for (row, entity) in entities.iter().enumerate() {
-            let current_entity = world.entities().resolve_from_id(*entity).unwrap();
-
+            let entity = Entity::from_raw_u32(*entity).unwrap();
+            let current_entity = world.entities().resolve_from_id(entity.row()).unwrap();
             let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
             for &(col_idx, ctor, comp_id, mode) in arch_info.iter() {
                 let col = &arch.columns[col_idx];
