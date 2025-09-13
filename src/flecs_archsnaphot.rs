@@ -52,12 +52,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
 
     let (map, _exclude) = derive_type_mapping_cache(&reg, &world); // do not want meta by default
 
-    world.defer_begin();
-    // for i in all_entities {
-    //     EntityView::new_from(world, *i).add::<SerializeTarget>();
-    // }
-    world.defer_end();
-
+ 
     let mut archs = vec![];
 
     world
