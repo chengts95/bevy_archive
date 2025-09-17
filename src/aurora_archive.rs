@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn test_msgpack_manifest_snapshot_roundtrip_file() {
         let path = "test.toml";
-        let arch_type_path = "arch_default";
+        let arch_type_path = "arch_default_msgpack";
         let (world, registry) = init_world();
         let guide = ExportGuidance::file_all(ExportFormat::MsgPack, arch_type_path);
 
@@ -805,7 +805,7 @@ mod tests {
     #[test]
     fn test_csv_msgpack_manifest_snapshot_roundtrip_file() {
         let path = "test_csvmsgpack_file.toml";
-        let arch_type_path = "arch_default";
+        let arch_type_path = "arch_default_csvmsgpack";
         let (world, registry) = init_world();
         let guide = ExportGuidance::file_all(ExportFormat::CsvMsgPack, arch_type_path);
 

@@ -52,7 +52,7 @@ pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapsh
         let mut es = EntitySnapshot::default();
         es.id = e.id().index() as u64;
         for key in reg.type_registry.keys() {
-            if let Some(func) = reg.get_factory(key).map(|x| x.export) {
+            if let Some(func) = reg.get_factory(key).map(|x| x.js_value.export) {
                 if let Some(value) = func(world, e.id()) {
                     es.components.push(ComponentSnapshot {
                         r#type: key.to_string(),
@@ -79,7 +79,7 @@ pub fn load_world_snapshot(world: &mut World, snapshot: &WorldSnapshot, reg: &Sn
         let entity = Entity::from_raw(e.id as u32);
         for c in &e.components {
             reg.get_factory(&c.r#type.as_str())
-                .map(|x| x.import)
+                .map(|x| x.js_value.import)
                 .and_then(|f| Some(f(&c.value, world, entity).unwrap()))
                 .unwrap()
         }
@@ -178,7 +178,7 @@ components = [
         let entity = world.spawn(component.clone()).id();
 
         // Export
-        let exported = (registry.get_factory("TestComponent").unwrap().export)(&world, entity);
+        let exported = (registry.get_factory("TestComponent").unwrap().js_value.export)(&world, entity);
         assert!(exported.is_some());
         let exported_value = exported.unwrap();
         assert_eq!(exported_value, json!({"value": 42}));

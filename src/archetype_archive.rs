@@ -148,7 +148,7 @@ pub fn load_world_resource(
         let factory = reg.get_res_factory(res);
         match factory {
             Some(factory) => {
-                (factory.import)(&data[res], world, Entity::from_raw(0)).unwrap();
+                (factory.js_value.import)(&data[res], world, Entity::from_raw(0)).unwrap();
             }
             None => {
                 //may need to emit warnings here
@@ -163,7 +163,7 @@ pub fn save_world_resource(
     let mut map = HashMap::new();
     let saveable_resource = reg.resource_entries.keys();
     for res in saveable_resource {
-        let value = (reg.get_res_factory(res).unwrap().export)(world, Entity::from_raw(0));
+        let value = (reg.get_res_factory(res).unwrap().js_value.export)(world, Entity::from_raw(0));
         if let Some(value) = value {
             map.insert(res.to_string(), value);
         }
@@ -203,7 +203,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                     StorageType::Table => StorageTypeFlag::Table,
                     StorageType::SparseSet => StorageTypeFlag::SparseSet,
                 });
-                let f = reg.get_factory(type_name).unwrap().export;
+                let f = reg.get_factory(type_name).unwrap().js_value.export;
                 archetype_snapshot.add_type(type_name, t);
                 let col = archetype_snapshot.get_column_mut(type_name).unwrap();
                 for (idx, &entity) in iter.iter().enumerate() {
@@ -243,7 +243,7 @@ pub fn load_world_arch_snapshot(
             let un = entities.iter().zip(col.iter());
             for (entity_id, value) in un {
                 let entity = Entity::from_raw(*entity_id);
-                match reg.get_factory(&type_name).map(|x| x.import) {
+                match reg.get_factory(&type_name).map(|x| x.js_value.import) {
                     Some(func) => {
                         if let Err(e) = func(value, world, entity) {
                             eprintln!(
@@ -288,7 +288,7 @@ pub fn load_world_arch_snapshot_defragment(
                     .comp_id_by_name(type_name.as_str(), world)
                     .or_else(|| Some(reg.reg_by_name(type_name, world)))?;
                 let mode = factory.mode;
-                Some((col_idx, factory.dyn_ctor, id, mode))
+                Some((col_idx, factory.js_value.dyn_ctor, id, mode))
             })
             .collect();
 

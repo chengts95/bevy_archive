@@ -9,6 +9,8 @@ use std::ptr::NonNull;
 mod snapshot_factory;
 pub use snapshot_factory::*;
 
+use crate::prelude::codec::JsonValueCodec;
+
 pub struct DeferredEntityBuilder<'a> {
     world: &'a mut World,
     entity: Entity,
@@ -178,25 +180,28 @@ impl SnapshotRegistry {
     pub fn resource_register<T: Resource + Serialize + DeserializeOwned>(&mut self) {
         let mode = SnapshotMode::Full;
         let factory = SnapshotFactory {
-            export: |world, _| {
-                world
-                    .get_resource::<T>()
-                    .map(|r| serde_json::to_value(r).unwrap())
+            js_value: JsonValueCodec {
+                export: |world, _| {
+                    world
+                        .get_resource::<T>()
+                        .map(|r| serde_json::to_value(r).unwrap())
+                },
+                import: |value, world, _| match serde_json::from_value::<T>(value.clone()) {
+                    Ok(resource) => {
+                        world.insert_resource(resource);
+                        Ok(())
+                    }
+                    Err(e) => Err(format!("Deserialization error: {}", e)),
+                },
+                dyn_ctor: |val, bump| {
+                    let name = short_type_name::<T>();
+                    let component: T = serde_json::from_value(val.clone())
+                        .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
+                    let ptr = bump.alloc(component) as *mut T;
+                    Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+                },
             },
-            import: |value, world, _| match serde_json::from_value::<T>(value.clone()) {
-                Ok(resource) => {
-                    world.insert_resource(resource);
-                    Ok(())
-                }
-                Err(e) => Err(format!("Deserialization error: {}", e)),
-            },
-            dyn_ctor: |val, bump| {
-                let name = short_type_name::<T>();
-                let component: T = serde_json::from_value(val.clone())
-                    .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
-                let ptr = bump.alloc(component) as *mut T;
-                Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
-            },
+
             comp_id: |world| world.resource_id::<T>(),
             register: |world| world.register_resource::<T>(),
             mode,
