@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, RecordBatch};
 
+use bevy_ecs::ptr::OwningPtr;
 use bevy_ecs::{component::ComponentId, prelude::*};
 
 use arrow::datatypes::{Field, FieldRef};
@@ -15,7 +16,6 @@ use serde_json::Value;
 mod factory;
 pub use factory::ArrowSnapshotFactory;
 
-
 pub type ArrowToJsonFn = fn(&ArrowColumn) -> Result<Vec<serde_json::Value>, String>;
 pub type JsonToArrowFn = fn(&[FieldRef], &Vec<serde_json::Value>) -> Result<ArrowColumn, String>;
 
@@ -25,11 +25,12 @@ pub struct ArrowColumn {
     pub data: Vec<ArrayRef>,
 }
 
-#[derive(Clone)]
-pub struct RawTData {
+pub struct RawTData<'a> {
     pub comp_id: ComponentId,
-    pub data: Vec<u8>,
+    pub data: Vec<OwningPtr<'a>>,
 }
+
+
 pub fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
         .rsplit("::")
@@ -45,7 +46,6 @@ pub enum SnapshotMode {
     PlaceholderEmplaceIfNotExists,
 }
 
- 
 impl ArrowColumn {
     pub fn to_arrow(&self) -> Result<RecordBatch, Box<dyn std::error::Error>> {
         // Build the record batch
