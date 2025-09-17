@@ -1,11 +1,13 @@
-use crate::prelude::{DynBuilderFn, ExportFn, ImportFn};
 use bevy_ecs::ptr::OwningPtr;
 use bevy_ecs::{component::ComponentId, prelude::*};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::ptr::NonNull;
-
+pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
+pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
+pub type DynBuilderFn =
+    for<'a> fn(&serde_json::Value, &'a bumpalo::Bump) -> Result<OwningPtr<'a>, String>;
 macro_rules! gen_export {
     (full, $t:ty) => {
         |world, entity| {
@@ -217,20 +219,14 @@ macro_rules! make_snapshot_factory {
         }
     }};
 }
- 
- 
-#[derive(Clone,Debug)]
+
+#[derive(Clone, Debug)]
 pub struct JsonValueCodec {
     pub export: ExportFn,
     pub import: ImportFn,
     pub dyn_ctor: DynBuilderFn,
 }
 impl JsonValueCodec {
-    #[inline]
-    fn component_id<T: Component>(world: &World) -> Option<ComponentId> {
-        world.component_id::<T>()
-    }
-
     pub fn new_with<T>(mode: SnapshotMode) -> Self
     where
         T: Serialize + DeserializeOwned + Component + Default + 'static,

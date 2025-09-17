@@ -1,18 +1,14 @@
-use bevy_ecs::ptr::OwningPtr;
+ 
 use bevy_ecs::{component::ComponentId, prelude::*};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::ptr::NonNull;
 
 use crate::prelude::codec::JsonValueCodec;
 pub mod codec;
-pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
-pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
+
 pub type CompIdFn = fn(&World) -> Option<ComponentId>;
 pub type CompRegFn = fn(&mut World) -> ComponentId;
-pub type DynBuilderFn =
-    for<'a> fn(&serde_json::Value, &'a bumpalo::Bump) -> Result<OwningPtr<'a>, String>;
 
 pub fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
