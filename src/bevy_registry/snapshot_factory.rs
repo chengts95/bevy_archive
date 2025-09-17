@@ -159,7 +159,6 @@ macro_rules! gen_all {
         )
     };
 }
-
 pub fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
         .rsplit("::")
@@ -184,7 +183,55 @@ pub struct SnapshotFactory {
     pub register: CompRegFn,
     pub mode: SnapshotMode,
 }
+macro_rules! build_snapshot {
+    ($t:ty, $mode:expr, $export:expr, $import:expr, $ctor:expr) => {
+        SnapshotFactory {
+            export: $export,
+            import: $import,
+            dyn_ctor: $ctor,
+            comp_id: SnapshotFactory::component_id::<$t>,
+            register: |world| world.register_component::<$t>(),
+            mode: $mode,
+        }
+    };
+}
 
+macro_rules! gen_all_full         { ($($t:tt)+) => { gen_all!(full, $($t)+) }; }
+macro_rules! gen_all_placeholder { ($($t:tt)+) => { gen_all!(placeholder, $($t)+) }; }
+macro_rules! gen_all_emplace     { ($($t:tt)+) => { gen_all!(emplace, $($t)+) }; }
+
+macro_rules! gen_and_build {
+    ($t:ty, $mode:expr, $gen_macro:ident) => {{
+        let (export, import, dyn_ctor): (ExportFn, ImportFn, DynBuilderFn) = $gen_macro!($t);
+        build_snapshot!($t, $mode, export, import, dyn_ctor)
+    }};
+    ($t:ty, $t1:ty, $mode:expr, $gen_macro:ident) => {{
+        let (export, import, dyn_ctor): (ExportFn, ImportFn, DynBuilderFn) = $gen_macro!($t, $t1);
+        build_snapshot!($t, $mode, export, import, dyn_ctor)
+    }};
+}
+macro_rules! make_snapshot_factory {
+    (T = $t:ty) => {{ gen_and_build!($t, SnapshotMode::Full, gen_all_full) }};
+    (T = $t:ty, mode = $mode:expr) => {{
+        match $mode {
+            SnapshotMode::Full => gen_and_build!($t, $mode, gen_all_full),
+            SnapshotMode::Placeholder => gen_and_build!($t, $mode, gen_all_placeholder),
+            SnapshotMode::PlaceholderEmplaceIfNotExists => {
+                gen_and_build!($t, $mode, gen_all_emplace)
+            }
+        }
+    }};
+    (T = $t:ty, T1 = $t1:ty) => {{ gen_and_build!($t, $t1, SnapshotMode::Full, gen_all_full) }};
+    (T = $t:ty, T1 = $t1:ty, mode = $mode:expr) => {{
+        match $mode {
+            SnapshotMode::Full => gen_and_build!($t, $t1, $mode, gen_all_full),
+            SnapshotMode::Placeholder => gen_and_build!($t, $t1, $mode, gen_all_placeholder),
+            SnapshotMode::PlaceholderEmplaceIfNotExists => {
+                gen_and_build!($t, $t1, $mode, gen_all_emplace)
+            }
+        }
+    }};
+}
 impl SnapshotFactory {
     #[inline]
     fn component_id<T: Component>(world: &World) -> Option<ComponentId> {
@@ -201,67 +248,27 @@ impl SnapshotFactory {
     where
         T: Serialize + DeserializeOwned + Component + 'static,
     {
-        let (export, import, dyn_ctor): (ExportFn, ImportFn, DynBuilderFn) = gen_all!(full, T);
-        Self {
-            export,
-            import,
-            dyn_ctor,
-            comp_id: Self::component_id::<T>,
-            register: |world| world.register_component::<T>(),
-            mode: SnapshotMode::Full,
-        }
+        make_snapshot_factory!(T = T)
     }
     pub fn new_with_wrapper_full<T, T1>() -> Self
     where
         T: Component,
         T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
     {
-        let (export, import, dyn_ctor): (ExportFn, ImportFn, DynBuilderFn) = gen_all!(full, T, T1);
-        Self {
-            export,
-            import,
-            dyn_ctor,
-            comp_id: Self::component_id::<T>,
-            register: |world| world.register_component::<T>(),
-            mode: SnapshotMode::Full,
-        }
+        make_snapshot_factory!(T = T, T1 = T1)
     }
     pub fn new_with_wrapper<T, T1>(mode: SnapshotMode) -> Self
     where
         T: Component,
         T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
     {
-        let (export, import, dyn_ctor): (ExportFn, ImportFn, DynBuilderFn) = match mode {
-            SnapshotMode::Full => gen_all!(full, T, T1),
-            SnapshotMode::Placeholder => gen_all!(placeholder, T, T1),
-            SnapshotMode::PlaceholderEmplaceIfNotExists => gen_all!(emplace, T, T1),
-        };
-        Self {
-            export,
-            import,
-            dyn_ctor,
-            comp_id: Self::component_id::<T>,
-            register: |world| world.register_component::<T>(),
-            mode,
-        }
+        make_snapshot_factory!(T = T, T1 = T1, mode = mode)
     }
 
     pub fn with_mode<T>(mode: SnapshotMode) -> Self
     where
         T: Serialize + DeserializeOwned + Component + Default + 'static,
     {
-        let (export, import, dyn_ctor): (ExportFn, ImportFn, DynBuilderFn) = match mode {
-            SnapshotMode::Full => gen_all!(full, T),
-            SnapshotMode::Placeholder => gen_all!(placeholder, T),
-            SnapshotMode::PlaceholderEmplaceIfNotExists => gen_all!(emplace, T),
-        };
-        Self {
-            export,
-            import,
-            dyn_ctor,
-            comp_id: Self::component_id::<T>,
-            register: |world| world.register_component::<T>(),
-            mode: SnapshotMode::Full,
-        }
+        make_snapshot_factory!(T = T, mode = mode)
     }
 }
