@@ -1,9 +1,8 @@
 use std::ptr::NonNull;
 
-use crate::prelude::{vec_snapshot_factory::*, CompIdFn, CompRegFn, SnapshotMode};
+use crate::prelude::{SnapshotMode, vec_snapshot_factory::*};
 use arrow::datatypes::FieldRef;
 use serde::de::DeserializeOwned;
-use serde_arrow::schema;
 
 pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn, String>;
 pub type ArrImportFn = fn(&ArrowColumn, &mut World, &[Entity]) -> Result<(), String>;
@@ -12,7 +11,7 @@ pub type ArrDynFn =
     for<'a> fn(&ArrowColumn, &'a bumpalo::Bump, &World) -> Result<RawTData<'a>, String>;
 
 impl DefaultSchema for Vec<FieldRef> {}
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct ArrowSnapshotFactory {
     pub arr_export: ArrExportFn,
     pub arr_import: ArrImportFn,

@@ -2,23 +2,21 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::sync::Arc;
 
-use crate::archetype_archive::ArchetypeSnapshot; 
-use crate::{ prelude::vec_snapshot_factory::ArrowColumn};
+use crate::archetype_archive::ArchetypeSnapshot;
+use crate::prelude::vec_snapshot_factory::ArrowColumn;
 use arrow::array::RecordBatch;
-use arrow::{compute::concat_batches, datatypes::*};
+use arrow::compute::concat_batches;
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::reader::ChunkReader;
 use serde::{Deserialize, Serialize};
-use serde_arrow::schema::{SchemaLike, TracingOptions};
-use serde_arrow::utils::Item;
 #[derive(Debug, Default, Clone)]
 pub struct ComponentTable {
     pub columns: BTreeMap<String, ArrowColumn>,
     pub entities: Vec<EntityID>,
 }
 
-#[derive(Debug, Default, Clone,Copy, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct EntityID {
     pub id: u32,
 }
@@ -67,7 +65,6 @@ impl ComponentTable {
     }
 }
 impl ComponentTable {
- 
     pub fn insert_column(&mut self, name: &str, column: ArrowColumn) {
         self.columns.insert(name.to_string(), column);
     }

@@ -60,48 +60,52 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
 
     let mut archs = vec![];
 
-    world.query::<()>().with::<flecs::Wildcard>().build().run_iter(|it, _| {
-        if it.count() <= 0 {
-            return;
-        }
-        let arch = it.archetype().unwrap();
-        let to_be_serialize: BTreeSet<_> = arch
-            .as_slice()
-            .iter()
-            .filter_map(|&x| map.get_by_right(&Entity(*x)))
-            .collect();
-
-        if to_be_serialize.is_empty() {
-            return;
-        }
-
-        let entities: Vec<_> = it.entities().iter().map(|x| x.0 as u32).collect();
-
-        let mut snap = ArchetypeSnapshot::default();
-        snap.entities.extend(entities.as_slice());
-        //hack name id for entity we can save only
-        if it.entity(0).get_name().is_some() {
-            let ty = "NameID";
-            snap.add_type(ty, None);
-            let col = snap.get_column_mut(ty).unwrap();
-            for (idx, _eid) in entities.iter().enumerate() {
-                col[idx] = serde_json::to_value(it.entity(idx).get_name().unwrap()).unwrap();
+    world
+        .query::<()>()
+        .with::<flecs::Wildcard>()
+        .build()
+        .run_iter(|it, _| {
+            if it.count() <= 0 {
+                return;
             }
-        }
+            let arch = it.archetype().unwrap();
+            let to_be_serialize: BTreeSet<_> = arch
+                .as_slice()
+                .iter()
+                .filter_map(|&x| map.get_by_right(&Entity(*x)))
+                .collect();
 
-        to_be_serialize
-            .iter()
-            .for_each(|ty| snap.add_type(ty, None));
-        for ty in &to_be_serialize {
-            let f = reg.exporters.get(ty.as_str()).unwrap();
-            let col = snap.get_column_mut(ty).unwrap();
-            for (idx, eid) in entities.iter().enumerate() {
-                col[idx] = f(world, Entity::new(*eid as u64)).unwrap();
+            if to_be_serialize.is_empty() {
+                return;
             }
-        }
 
-        archs.push(snap);
-    });
+            let entities: Vec<_> = it.entities().iter().map(|x| x.0 as u32).collect();
+
+            let mut snap = ArchetypeSnapshot::default();
+            snap.entities.extend(entities.as_slice());
+            //hack name id for entity we can save only
+            if it.entity(0).get_name().is_some() {
+                let ty = "NameID";
+                snap.add_type(ty, None);
+                let col = snap.get_column_mut(ty).unwrap();
+                for (idx, _eid) in entities.iter().enumerate() {
+                    col[idx] = serde_json::to_value(it.entity(idx).get_name().unwrap()).unwrap();
+                }
+            }
+
+            to_be_serialize
+                .iter()
+                .for_each(|ty| snap.add_type(ty, None));
+            for ty in &to_be_serialize {
+                let f = reg.exporters.get(ty.as_str()).unwrap();
+                let col = snap.get_column_mut(ty).unwrap();
+                for (idx, eid) in entities.iter().enumerate() {
+                    col[idx] = f(world, Entity::new(*eid as u64)).unwrap();
+                }
+            }
+
+            archs.push(snap);
+        });
 
     world_snapshot.archetypes.extend(archs);
     //world.remove_all::<SerializeTarget>();

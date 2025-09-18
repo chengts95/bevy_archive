@@ -178,7 +178,11 @@ components = [
         let entity = world.spawn(component.clone()).id();
 
         // Export
-        let exported = (registry.get_factory("TestComponent").unwrap().js_value.export)(&world, entity);
+        let exported = (registry
+            .get_factory("TestComponent")
+            .unwrap()
+            .js_value
+            .export)(&world, entity);
         assert!(exported.is_some());
         let exported_value = exported.unwrap();
         assert_eq!(exported_value, json!({"value": 42}));

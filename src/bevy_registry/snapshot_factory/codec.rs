@@ -1,5 +1,5 @@
+use bevy_ecs::prelude::*;
 use bevy_ecs::ptr::OwningPtr;
-use bevy_ecs::{component::ComponentId, prelude::*};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;

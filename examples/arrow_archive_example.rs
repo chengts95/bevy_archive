@@ -2,29 +2,16 @@
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
 
 use bevy_archive::{
-    archetype_archive::StorageTypeFlag,
     arrow_archive::{ComponentTable, EntityID},
     prelude::*,
 };
-use bevy_ecs::{
-    component::{ComponentId, StorageType},
-    prelude::*,
-};
-use parquet::{
-    arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder},
-    file::reader::ChunkReader,
-};
+use bevy_ecs::{component::ComponentId, prelude::*};
 use serde::{Deserialize, Serialize};
 use serde_arrow::{
     marrow::{self, datatypes::Field},
-    schema::{SchemaLike, TracingOptions},
+    schema::SchemaLike,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    fs,
-    io::Cursor,
-    sync::Arc,
-};
+use std::collections::HashMap;
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
 struct PositionInner {
     x: f32,
@@ -194,9 +181,9 @@ pub struct WorldArrowSnapshot {
 }
 fn main() {
     use arrow::datatypes;
-    use base64::prelude::BASE64_STANDARD;
+
     use serde_arrow::schema::TracingOptions;
-    use serde_arrow::{from_arrow, to_arrow};
+    use serde_arrow::to_arrow;
 
     // 初始化世界和组件数据
     let mut world = World::new();
