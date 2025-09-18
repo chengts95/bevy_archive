@@ -18,7 +18,7 @@ pub struct ComponentTable {
     pub entities: Vec<EntityID>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone,Copy, Serialize, Deserialize)]
 pub struct EntityID {
     pub id: u32,
 }
@@ -133,6 +133,7 @@ impl ComponentTable {
         }
         Ok(buffer)
     }
+    ///! Caution: this does not support nested struct due to arrow limitations.
     pub fn to_csv(&self) -> Result<String, Box<dyn std::error::Error>> {
         let record_batch = self.to_record_batch()?;
         let buffer = Cursor::new(Vec::new());

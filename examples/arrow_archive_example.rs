@@ -1,9 +1,15 @@
 //! Basic example for the entity_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
 
-
-use bevy_archive::{arrow_archive::{ComponentTable, EntityID}, prelude::*};
-use bevy_ecs::prelude::*;
+use bevy_archive::{
+    archetype_archive::StorageTypeFlag,
+    arrow_archive::{ComponentTable, EntityID},
+    prelude::*,
+};
+use bevy_ecs::{
+    component::{ComponentId, StorageType},
+    prelude::*,
+};
 use parquet::{
     arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder},
     file::reader::ChunkReader,
@@ -181,7 +187,11 @@ use bevy_archive::bevy_registry::vec_snapshot_factory::*;
 struct Test {
     pub v: Vec<i32>,
 }
-
+#[derive(Debug, Clone, Default)]
+pub struct WorldArrowSnapshot {
+    pub entities: Vec<u32>,
+    pub archetypes: Vec<ComponentTable>,
+}
 fn main() {
     use arrow::datatypes;
     use base64::prelude::BASE64_STANDARD;
@@ -234,7 +244,7 @@ fn main() {
         .collect();
     // 序列化为 Arrow 格式
     let v_arrays = to_arrow(&vel_fields, vel_data).unwrap();
-    let mut e = Field::default(); 
+    let mut e = Field::default();
     e.data_type = marrow::datatypes::DataType::Int32;
     e.name = String::from("id");
 
@@ -259,8 +269,52 @@ fn main() {
     let parquet = table.to_parquet().unwrap();
     let new_table = ComponentTable::from_parquet_u8(&parquet).unwrap();
 
-    println!("{ }", new_table.entities.len());
     let d = new_table.get_column("Position").unwrap();
 
-    println!("{:?}", d.to_vec::<Position>().unwrap());
+    let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
+
+    let reg_comp_ids: HashMap<ComponentId, &str> = registry
+        .type_registry
+        .keys()
+        .filter_map(|&name| {
+            registry
+                .comp_id_by_name(name, &world)
+                .map(|cid| (cid, name))
+        })
+        .collect();
+    let mut world_snapshot = WorldArrowSnapshot::default();
+    let snap = archetypes.map(|archetype| {
+        let can_be_stored = archetype
+            .components()
+            .any(|x| reg_comp_ids.contains_key(&x));
+        if !can_be_stored {
+            return ComponentTable::default();
+        }
+        let mut archetype_snapshot = ComponentTable::default();
+        let entities: Vec<_> = archetype.entities().iter().map(|x| x.id()).collect();
+        let entities_ids: Vec<_> = archetype
+            .entities()
+            .iter()
+            .map(|x| (EntityID { id: x.id().index() }))
+            .collect();
+        archetype_snapshot.entities.extend(entities_ids.as_slice());
+
+        archetype.components().for_each(|x| {
+            if reg_comp_ids.contains_key(&x) {
+                let type_name = reg_comp_ids[&x];
+                // let t = archetype.get_storage_type(x).map(|x| match x {
+                //     StorageType::Table => StorageTypeFlag::Table,
+                //     StorageType::SparseSet => StorageTypeFlag::SparseSet,
+                // });
+                let arrow = &registry.get_factory(type_name).unwrap().arrow;
+                let arrow = arrow.as_ref().unwrap();
+                let column = (arrow.arr_export)(&arrow.schema, &world, &entities);
+                archetype_snapshot.insert_column(type_name, column.unwrap());
+            }
+        });
+
+        archetype_snapshot
+    });
+    world_snapshot.archetypes = snap.collect();
+    world_snapshot.entities = world.iter_entities().map(|x| x.id().index()).collect();
 }

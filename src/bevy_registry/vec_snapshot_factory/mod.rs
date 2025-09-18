@@ -5,16 +5,19 @@ use arrow::array::{ArrayRef, RecordBatch};
 use bevy_ecs::ptr::OwningPtr;
 use bevy_ecs::{component::ComponentId, prelude::*};
 
-use arrow::datatypes::{Field, FieldRef};
+use arrow::datatypes::{DataType, Field, FieldRef};
 use parquet::arrow::ArrowWriter;
 
 use serde::{Deserialize, Serialize};
 use serde_arrow::schema::SchemaLike;
 use serde_arrow::schema::TracingOptions;
+use serde_arrow::utils::Item;
 use serde_json::Value;
 
 mod factory;
 pub use factory::ArrowSnapshotFactory;
+
+use crate::prelude::SnapshotMode;
 
 pub type ArrowToJsonFn = fn(&ArrowColumn) -> Result<Vec<serde_json::Value>, String>;
 pub type JsonToArrowFn = fn(&[FieldRef], &Vec<serde_json::Value>) -> Result<ArrowColumn, String>;
@@ -30,20 +33,11 @@ pub struct RawTData<'a> {
     pub data: Vec<OwningPtr<'a>>,
 }
 
-
 pub fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
         .rsplit("::")
         .next()
         .unwrap_or("unknown")
-}
-
-#[derive(Default, Debug, Clone, Copy)]
-pub enum SnapshotMode {
-    #[default]
-    Full,
-    Placeholder,
-    PlaceholderEmplaceIfNotExists,
 }
 
 impl ArrowColumn {
@@ -154,9 +148,20 @@ impl JsonConversion for ArrowColumn {
 }
 pub trait DefaultSchema {
     fn default_schema<'de, T: Deserialize<'de>>() -> Vec<FieldRef> {
-        Vec::from_type::<T>(TracingOptions::default()).unwrap()
+        let ret: Result<Vec<FieldRef>, _> = Vec::from_type::<T>(TracingOptions::default());
+        match ret {
+            Ok(fields) => fields,
+            Err(_e) => Vec::from_type::<Item<T>>(TracingOptions::default()).unwrap(),
+        }
     }
-    fn default_null_schema<'de, T: Deserialize<'de>>() -> Vec<FieldRef> {
+    fn forced_null_schema<'de, T: Deserialize<'de>>(mode: SnapshotMode) -> Vec<FieldRef> {
+        let field = Field::new("item", DataType::Boolean, true);
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("mode".to_string(), serde_json::to_string(&mode).unwrap());
+        let field = field.with_metadata(metadata);
+        Vec::from(vec![Arc::new(field)])
+    }
+    fn with_null_schema<'de, T: Deserialize<'de>>() -> Vec<FieldRef> {
         let a = TracingOptions::default();
         Vec::from_type::<T>(a.allow_null_fields(true)).unwrap()
     }

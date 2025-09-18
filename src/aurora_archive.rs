@@ -20,6 +20,8 @@ use crate::archetype_archive::{
     load_world_arch_snapshot_defragment as load_world_arch_snapshot, load_world_resource,
     save_world_arch_snapshot, save_world_resource,
 };
+#[cfg(feature = "arrow_rs")]
+use crate::arrow_archive::ComponentTable;
 use crate::bevy_registry::SnapshotRegistry;
 use crate::csv_archive::ColumnarCsv;
 use crate::csv_archive::columnar_from_snapshot;
@@ -49,6 +51,8 @@ pub enum AuroraFormat {
     Json,
     MsgPack,    // msgpack
     CsvMsgPack, // csv in msgpack
+    #[cfg(feature = "arrow_rs")]
+    Parquet,
     Unknown,
 }
 
@@ -63,6 +67,12 @@ impl AuroraFormat {
         } else if path.ends_with(".msgpack") {
             Self::MsgPack
         } else {
+            #[cfg(feature = "arrow_rs")]
+            {
+                if path.ends_with(".parquet") {
+                    return Self::Parquet;
+                }
+            }
             Self::Unknown
         }
     }
@@ -73,6 +83,8 @@ impl AuroraFormat {
             "json" => Self::Json,
             "msgpack" => Self::MsgPack,
             "csv.msgpack" => Self::CsvMsgPack,
+            #[cfg(feature = "arrow_rs")]
+            "parquet" => Self::Parquet,
             _ => Self::Unknown,
         }
     }
@@ -87,6 +99,8 @@ pub struct LoadedBlob {
 pub enum AuroraInternalFormat {
     ColumnarCsv(ColumnarCsv),
     ArchetypeSnapshot(ArchetypeSnapshot),
+    #[cfg(feature = "arrow_rs")]
+    ArrowComponentTable(ComponentTable),
 }
 /// Load a blob from a specified `AuroraLocation`, resolving relative paths with a base directory.
 ///
@@ -165,6 +179,10 @@ fn parse_blob(blob: &LoadedBlob) -> Result<AuroraInternalFormat, String> {
             .map_err(|e| e.to_string()),
         AuroraFormat::CsvMsgPack => rmp_serde::from_slice(&blob.bytes)
             .map(AuroraInternalFormat::ColumnarCsv)
+            .map_err(|e| e.to_string()),
+        #[cfg(feature = "arrow_rs")]
+        AuroraFormat::Parquet => ComponentTable::from_parquet_u8(&blob.bytes)
+            .map(AuroraInternalFormat::ArrowComponentTable)
             .map_err(|e| e.to_string()),
         _ => Err("Cannot parse unknown format".into()),
     }
@@ -394,6 +412,7 @@ impl From<&WorldWithAurora> for WorldArchSnapshot {
                     snap
                 }
                 AuroraInternalFormat::ArchetypeSnapshot(data) => data,
+                _ => panic!("not supported"),
             };
 
             all_entities.extend(snapshot.entities.clone());

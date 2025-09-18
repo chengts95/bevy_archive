@@ -207,6 +207,8 @@ impl SnapshotRegistry {
             comp_id: |world| world.resource_id::<T>(),
             register: |world| world.register_resource::<T>(),
             mode,
+            #[cfg(feature="arrow_rs")]
+            arrow: None,
         };
         self.resource_entries
             .insert(short_type_name::<T>(), factory);
