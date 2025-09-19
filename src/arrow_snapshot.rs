@@ -65,7 +65,13 @@ impl ComponentTable {
     }
 }
 impl ComponentTable {
- 
+    pub fn column_names(&self) -> impl Iterator<Item = &String> {
+        self.columns.keys()
+    }
+    pub fn columns(&self) -> std::collections::btree_map::Iter<'_, String, ArrowColumn> {
+        self.columns.iter()
+    }
+
     pub fn insert_column(&mut self, name: &str, column: ArrowColumn) {
         self.columns.insert(name.to_string(), column);
     }

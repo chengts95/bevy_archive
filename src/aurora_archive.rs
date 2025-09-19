@@ -21,7 +21,7 @@ use crate::archetype_archive::{
     save_world_arch_snapshot, save_world_resource,
 };
 #[cfg(feature = "arrow_rs")]
-use crate::arrow_archive::ComponentTable;
+use crate::arrow_snapshot::ComponentTable;
 use crate::bevy_registry::SnapshotRegistry;
 use crate::csv_archive::ColumnarCsv;
 use crate::csv_archive::columnar_from_snapshot;

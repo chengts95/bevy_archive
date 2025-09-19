@@ -8,7 +8,7 @@ pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn,
 pub type ArrImportFn = fn(&ArrowColumn, &mut World, &[Entity]) -> Result<(), String>;
 
 pub type ArrDynFn =
-    for<'a> fn(&ArrowColumn, &'a bumpalo::Bump, &World) -> Result<RawTData<'a>, String>;
+    for<'a> fn(&ArrowColumn, &'a bumpalo::Bump, &World) -> Result<Vec<OwningPtr<'a>>, String>;
 
 impl DefaultSchema for Vec<FieldRef> {}
 #[derive(Clone, Debug)]
@@ -280,8 +280,6 @@ where
     T: Serialize + DeserializeOwned + Component,
 {
     let arr_dyn_ctor: ArrDynFn = |arrow, bump, world| {
-        let comp_id = world.component_id::<T>().unwrap();
-
         let data: Vec<T> = arrow.to_vec().unwrap();
         let data = data
             .into_iter()
@@ -290,7 +288,7 @@ where
                 unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
             })
             .collect();
-        Ok(RawTData { comp_id, data })
+        Ok(data)
     };
     arr_dyn_ctor
 }
@@ -302,8 +300,6 @@ where
     let arr_dyn_ctor: ArrDynFn = match mode {
         SnapshotMode::Full => build_dyn_ctor_full::<T>(),
         _ => |arrow, bump, world| {
-            let comp_id = world.component_id::<T>().unwrap();
-
             let length = arrow.data.len();
             let data = [0..length]
                 .into_iter()
@@ -312,7 +308,7 @@ where
                     unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
                 })
                 .collect();
-            Ok(RawTData { comp_id, data })
+            Ok(data)
         },
     };
     arr_dyn_ctor
@@ -323,8 +319,6 @@ where
     T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
 {
     let arr_dyn_ctor: ArrDynFn = |arrow, bump, world| {
-        let comp_id = world.component_id::<T>().unwrap();
-
         let data: Vec<T1> = arrow.to_vec().unwrap();
         let data = data
             .into_iter()
@@ -333,7 +327,7 @@ where
                 unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
             })
             .collect();
-        Ok(RawTData { comp_id, data })
+        Ok(data)
     };
     arr_dyn_ctor
 }
@@ -346,8 +340,6 @@ where
     let arr_dyn_ctor: ArrDynFn = match mode {
         SnapshotMode::Full => build_dyn_ctor_wrapper_full::<T, T1>(),
         _ => |arrow, bump, world| {
-            let comp_id = world.component_id::<T>().unwrap();
-
             let length = arrow.data.len();
             let data = [0..length]
                 .into_iter()
@@ -356,7 +348,7 @@ where
                     unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
                 })
                 .collect();
-            Ok(RawTData { comp_id, data })
+            Ok(data)
         },
     };
     arr_dyn_ctor
