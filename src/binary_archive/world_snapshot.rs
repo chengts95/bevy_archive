@@ -1,10 +1,9 @@
-use bevy_ecs::{
-    component::ComponentId,
-    entity::Entity,
-    world::{Mut, World},
-};
+use bevy_ecs::{component::ComponentId, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+mod zip_snapshot;
+
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
 pub enum BinFormat {
     #[default]
@@ -154,15 +153,19 @@ impl WorldArrowSnapshot {
         Ok(world_snapshot)
     }
 
-    pub fn to_world(&self, world: &mut World) {
+    pub fn to_world(&self, world: &mut World) -> Result<(), SnapshotError> {
         world.resource_scope(|world, reg: Mut<SnapshotRegistry>| self.to_world_reg(world, &reg))
     }
-    pub fn to_world_reg(&self, world: &mut World, reg: &SnapshotRegistry) {
+    pub fn to_world_reg(
+        &self,
+        world: &mut World,
+        reg: &SnapshotRegistry,
+    ) -> Result<(), SnapshotError> {
         world
             .entities()
             .reserve_entities(count_entities(&self.entities));
         world.flush();
-        Self::load_world_resource(&self.resources, world, reg);
+        Self::load_world_resource(&self.resources, world, reg)?;
         let mut bump = bumpalo::Bump::new();
         for archetype in &self.archetypes {
             let mut columns = Vec::new();
@@ -175,7 +178,7 @@ impl WorldArrowSnapshot {
                         .or_else(|| Some(reg.reg_by_name(type_name, world)))
                         .unwrap();
                     let mode = unsafe { reg.get_factory(type_name).unwrap_unchecked().mode };
-                    let data = (arrow.arr_dyn)(data, &bump, world).unwrap();
+                    let data = (arrow.arr_dyn)(data, &bump, world)?;
                     let raw_vec = RawTData { comp_id, data };
                     columns.push((mode, raw_vec));
                 } else {
@@ -183,7 +186,10 @@ impl WorldArrowSnapshot {
                 }
             }
             for id in archetype.entities.iter().rev() {
-                let entity = world.entities().resolve_from_id(id.id).unwrap();
+                let entity = world
+                    .entities()
+                    .resolve_from_id(id.id)
+                    .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
                 let mut builder = DeferredEntityBuilder::new(world, &bump, entity);
                 for (mode, raw) in &mut columns {
                     let ptr = raw.data.pop().unwrap();
@@ -201,6 +207,7 @@ impl WorldArrowSnapshot {
 
             bump.reset();
         }
+        Ok(())
     }
 }
 

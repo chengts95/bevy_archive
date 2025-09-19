@@ -1,8 +1,6 @@
 //! Basic example for the arrow_world_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
-use std::io::Write;
-
-use bevy_archive::{
+use crate::{
     binary_archive::{WorldArrowSnapshot, WorldBinArchSnapshot},
     prelude::*,
 };
@@ -147,64 +145,49 @@ fn build_sample_world(world: &mut World) -> Entity {
     boss.id()
 }
 
-// fn test_roundtrip_with_children() {
-//     let mut world = World::new();
-//     let registry = setup_registry();
-//     let boss_id = build_sample_world(&mut world);
-
-//     let snapshot = save_world_manifest(&world, &registry).unwrap();
-//     println!(
-//         "\n\u{1F4C8} Snapshot: {}",
-//         toml::to_string_pretty(&snapshot).unwrap()
-//     );
-
-//     let path = "example_output.toml";
-//     snapshot.to_file(path, None).unwrap();
-//     println!("\u{1F4BE} Snapshot saved to `{}`", path);
-
-//     let mut new_world = World::new();
-//     let registry = setup_registry();
-//     let loaded = AuroraWorldManifest::from_file(path, None).unwrap();
-
-//     load_world_manifest(&mut new_world, &loaded, &registry).unwrap();
-//     let snapshot = save_world_manifest(&new_world, &registry).unwrap();
-//     println!(
-//         "\n\u{1F4C8} Reloaded Snapshot: {}",
-//         toml::to_string_pretty(&snapshot).unwrap()
-//     );
-
-//     if let Some(children) = new_world.entity(boss_id).get::<Children>() {
-//         println!("Children of boss {:?}: {:?}", boss_id, children);
-//     } else {
-//         println!("⚠️ Boss {:?} has no children after reload", boss_id);
-//     }
-
-//     let _ = fs::remove_file(path);
-//     println!("new archtypes len:{}", new_world.archetypes().len());
-//     println!("old archtypes len:{}", world.archetypes().len());
-// }
-
-fn main() {
-    // 初始化世界和组件数据
+#[test]
+fn test_full_roundtrip_with_arrow_and_manifest() {
+    use std::fs;
+    use bevy_ecs::world::World;   
+    // === 构造原始世界 ===
     let mut world = World::new();
-    build_sample_world(&mut world);
-    // 注册组件类型
     let registry = setup_registry();
+    let boss_id = build_sample_world(&mut world);
 
-    let arrow = WorldArrowSnapshot::from_world_reg(&world, &registry).unwrap();
-    let data = WorldBinArchSnapshot::from(arrow);
-    let final_data = rmp_serde::to_vec(&data).unwrap();
-    let data: WorldBinArchSnapshot = rmp_serde::from_slice(&final_data).unwrap();
-    let arrow = WorldArrowSnapshot::from(data);
+    // === ⏺️ Roundtrip 1: Manifest TOML 文件序列化测试 ===
+    let snapshot = save_world_manifest(&world, &registry).unwrap();
+    let path = "example_output.toml";
+    snapshot.to_file(path, None).unwrap();
+
     let mut new_world = World::new();
-    arrow.to_world_reg(&mut new_world, &registry).unwrap();
-    let mut q = new_world.query::<(Entity, &Position)>();
-    let zip = arrow.to_zip(Some(6)).unwrap();
+    let loaded = AuroraWorldManifest::from_file(path, None).unwrap();
+    load_world_manifest(&mut new_world, &loaded, &registry).unwrap();
 
-    let mut f = std::fs::File::create("ecs_world.zip").unwrap();
-    f.write_all(&zip).unwrap();
-    
-    for (entity, data) in q.iter(&new_world) {
-        println!("entity: {} data: {:?}", entity, data);
+    if let Some(children) = new_world.entity(boss_id).get::<Children>() {
+        println!("🧒 Boss {:?} has children: {:?}", boss_id, children);
+        assert!(children.len() >= 2);
+    } else {
+        panic!("❌ Boss {:?} has no children after reload", boss_id);
     }
+
+    fs::remove_file(path).unwrap();
+
+    // === ⏺️ Roundtrip 2: Arrow → Binary Snapshot → Arrow Snapshot → World ===
+    let arrow = WorldArrowSnapshot::from_world_reg(&world, &registry).unwrap();
+    let data = WorldBinArchSnapshot::from(arrow.clone());
+    let encoded = rmp_serde::to_vec(&data).unwrap();
+    let decoded: WorldBinArchSnapshot = rmp_serde::from_slice(&encoded).unwrap();
+    let re_arrow = WorldArrowSnapshot::from(decoded);
+    let mut binary_world = World::new();
+    re_arrow.to_world_reg(&mut binary_world, &registry).unwrap();
+
+    let mut q = binary_world.query::<(Entity, &Position)>();
+    let mut found = 0;
+    for (entity, pos) in q.iter(&binary_world) {
+        println!("📦 entity {:?} → pos {:?}", entity, pos);
+        found += 1;
+    }
+
+    assert!(found >= 3, "Expected at least 3 Position entities");
+    println!("✅ Binary roundtrip complete with {} Position entities", found);
 }

@@ -1,6 +1,6 @@
 [package]
 name = "bevy_archive"
-version = "0.1.5-dev"
+version = "0.2.0-dev"
 edition = "2024"
 authors = ["cts chengts95@msn.cn"]
 description = "An experimental ECS world snapshot system built on Bevy, featuring structured archetype storage and manifest-based serialization."
@@ -20,7 +20,7 @@ required-features = ["arrow_rs"]
 default = ["bevy","arrow_rs"]
 bevy = []
 flecs = ["flecs_ecs","bimap"]
-arrow_rs = ["dep:serde_arrow","dep:arrow","dep:parquet","dep:bytes" ]
+arrow_rs = ["dep:serde_arrow","dep:arrow","dep:parquet","dep:bytes","dep:zip" ,"dep:bytemuck"]
 
 [dependencies]
 bevy_ecs =  "^0.16.0"
@@ -38,3 +38,5 @@ parquet = {version = "^56.1.0", optional = true}
 arrow = {version = "^56.1.0", optional = true}
 bytes = {version = "^1.10.1", optional = true} 
 thiserror = "^2.0.16"
+zip = {version ="5.1.1",optional = true}
+bytemuck = {version ="1.23.2",optional = true}
