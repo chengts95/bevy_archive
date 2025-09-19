@@ -2,7 +2,9 @@
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
 
 use bevy_archive::{
-    arrow_snapshot::{ComponentTable, EntityID}, binary_archive::{WorldArrowSnapshot, WorldBinArchSnapshot}, prelude::*
+    arrow_snapshot::{ComponentTable, EntityID},
+    binary_archive::{WorldArrowSnapshot, WorldBinArchSnapshot},
+    prelude::*,
 };
 use bevy_ecs::{component::ComponentId, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -11,22 +13,20 @@ use serde_arrow::{
     schema::SchemaLike,
 };
 use std::collections::HashMap;
-#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
-struct PositionInner {
-    x: f32,
-    y: f32,
-}
 
 // === Test Components ===
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
-struct Position(pub f32, pub PositionInner);
+struct Position {
+    x: f32,
+    y: f32,
+}
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
 struct Velocity {
     dx: f32,
     dy: f32,
 }
 
-#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq,Default)]
 struct Tag;
 
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -65,6 +65,21 @@ impl Into<Vector2> for Vector2Wrapper {
         Vector2([self.x, self.y])
     }
 }
+
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
+pub struct TagWrapper{
+    value:bool
+}
+impl From<&Tag> for TagWrapper {
+    fn from(_p: &Tag) -> Self {
+        Self{value:true}
+    }
+}
+impl From<TagWrapper> for Tag{
+    fn from(_p: TagWrapper) -> Self {
+        Self
+    }
+}
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct ChildOfWrapper(pub u32);
 impl From<&ChildOf> for ChildOfWrapper {
@@ -77,59 +92,60 @@ impl Into<ChildOf> for ChildOfWrapper {
         ChildOf(Entity::from_raw(self.0))
     }
 }
-// fn setup_registry() -> SnapshotRegistry {
-//     let mut registry = SnapshotRegistry::default();
-//     registry.register::<Position>();
-//     registry.register::<Velocity>();
-//     registry.register::<Tag>();
-//     registry.register::<Inventory>();
-//     registry.register::<NestedComponent>();
-//     registry.register_with::<Vector2, Vector2Wrapper>();
-//     registry.register_with::<ChildOf, ChildOfWrapper>();
-//     registry.resource_register::<ResComponent>();
-//     registry
-// }
+fn setup_registry() -> SnapshotRegistry {
+    let mut registry = SnapshotRegistry::default();
+    registry.register::<Position>();
+    registry.register::<Velocity>();
 
-// fn build_sample_world(world: &mut World) -> Entity {
-//     world.spawn((Position { x: 1.0, y: 2.0 }, Velocity { dx: 0.1, dy: -0.2 }));
-//     world.spawn((Tag, Position { x: 9.0, y: 3.5 }));
-//     world.spawn((Inventory(vec!["potion".into(), "sword".into()]),));
-//     world.insert_resource(ResComponent {
-//         inner: Vector2([0.0, 3.0]),
-//         name: "sim_cfg".to_string(),
-//         sim_duration: 10.0,
-//     });
-//     let mut boss = world.spawn((
-//         Position { x: 0.0, y: 0.0 },
-//         Tag,
-//         NestedComponent {
-//             inner: Vector2([3.0, 2.0]),
-//             name: "Boss".into(),
-//         },
-//         Vector2([3.0, 2.0]),
-//     ));
-//     boss.with_children(|children| {
-//         let minion1 = children
-//             .spawn((
-//                 Position { x: -1.0, y: 0.0 },
-//                 Inventory(vec!["dagger".into()]),
-//             ))
-//             .id();
-//         let minion2 = children
-//             .spawn((
-//                 Position { x: 1.0, y: 0.0 },
-//                 Inventory(vec!["shield".into()]),
-//             ))
-//             .id();
-//         println!(
-//             "Spawned parent {:?} with children {:?} and {:?}",
-//             children.target_entity(),
-//             minion1,
-//             minion2
-//         );
-//     });
-//     boss.id()
-// }
+     registry.register_with_mode::<Tag>(SnapshotMode::Placeholder);
+    registry.register::<Inventory>();
+    registry.register::<NestedComponent>();
+    registry.register_with::<Vector2, Vector2Wrapper>();
+    registry.register_with::<ChildOf, ChildOfWrapper>();
+    registry.resource_register::<ResComponent>();
+    registry
+}
+
+fn build_sample_world(world: &mut World) -> Entity {
+    world.spawn((Position { x: 1.0, y: 2.0 }, Velocity { dx: 0.1, dy: -0.2 }));
+    world.spawn((Tag, Position { x: 9.0, y: 3.5 }));
+    world.spawn((Inventory(vec!["potion".into(), "sword".into()]),));
+    world.insert_resource(ResComponent {
+        inner: Vector2([0.0, 3.0]),
+        name: "sim_cfg".to_string(),
+        sim_duration: 10.0,
+    });
+    let mut boss = world.spawn((
+        Position { x: 0.0, y: 0.0 },
+        Tag,
+        NestedComponent {
+            inner: Vector2([3.0, 2.0]),
+            name: "Boss".into(),
+        },
+        Vector2([3.0, 2.0]),
+    ));
+    boss.with_children(|children| {
+        let minion1 = children
+            .spawn((
+                Position { x: -1.0, y: 0.0 },
+                Inventory(vec!["dagger".into()]),
+            ))
+            .id();
+        let minion2 = children
+            .spawn((
+                Position { x: 1.0, y: 0.0 },
+                Inventory(vec!["shield".into()]),
+            ))
+            .id();
+        println!(
+            "Spawned parent {:?} with children {:?} and {:?}",
+            children.target_entity(),
+            minion1,
+            minion2
+        );
+    });
+    boss.id()
+}
 
 // fn test_roundtrip_with_children() {
 //     let mut world = World::new();
@@ -181,45 +197,20 @@ fn main() {
 
     // 初始化世界和组件数据
     let mut world = World::new();
-    let positions: Vec<Position> = (0..1000)
-        .map(|i| {
-            Position(
-                i as f32,
-                PositionInner {
-                    x: i as f32,
-                    y: (i * 2) as f32,
-                },
-            )
-        })
-        .collect();
-    let velocities: Vec<Velocity> = (0..1000)
-        .map(|i| Velocity {
-            dx: (i + 1) as f32,
-            dy: (i * 4) as f32,
-        })
-        .collect();
-
-    // 批量生成实体
-    world.spawn_batch(positions.into_iter().zip(velocities.into_iter()));
-
- 
+    build_sample_world(&mut world);
     // 注册组件类型
-    let mut registry = SnapshotRegistry::default();
-    registry.register::<Position>();
-    registry.register::<Velocity>();
-    registry.register::<Test>();
+    let registry = setup_registry();
 
     let arrow = WorldArrowSnapshot::from_world_reg(&world, &registry);
     let data = WorldBinArchSnapshot::from(arrow);
     let final_data = rmp_serde::to_vec(&data).unwrap();
-    let data :WorldBinArchSnapshot = rmp_serde::from_slice(&final_data).unwrap();
+    let data: WorldBinArchSnapshot = rmp_serde::from_slice(&final_data).unwrap();
     let arrow = WorldArrowSnapshot::from(data);
-    let mut new_world = World::new(); 
-    arrow.to_world_reg(& mut new_world, &registry);
-    let mut q = new_world.query::<(Entity,&Position)>();
+    let mut new_world = World::new();
+    arrow.to_world_reg(&mut new_world, &registry);
+    let mut q = new_world.query::<(Entity, &Position)>();
 
-    for (entity,data) in q.iter(&new_world){
-        println!("entity: {} data: {:?}",entity,data);
+    for (entity, data) in q.iter(&new_world) {
+        println!("entity: {} data: {:?}", entity, data);
     }
- 
 }

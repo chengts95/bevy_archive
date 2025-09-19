@@ -1,8 +1,10 @@
 use std::ptr::NonNull;
 
 use crate::prelude::{SnapshotMode, vec_snapshot_factory::*};
-use arrow::datatypes::FieldRef;
+use arrow::{array::Array, datatypes::FieldRef};
+use bevy_ecs::error::panic;
 use serde::de::DeserializeOwned;
+use serde_arrow::marrow::error::MarrowError;
 
 pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn, String>;
 pub type ArrImportFn = fn(&ArrowColumn, &mut World, &[Entity]) -> Result<(), String>;
@@ -111,7 +113,7 @@ where
     T: Serialize + DeserializeOwned + Component,
 {
     let arr_import: ArrImportFn = |arrow, world, entities| {
-        let data: Vec<T> = arrow.to_vec().map_err(|x| x.to_string())?;
+        let data: Vec<T> = deserialize_data(arrow);
         let temp_data: Vec<(Entity, T)> =
             entities.iter().map(|x| *x).zip(data.into_iter()).collect();
         world.insert_batch(temp_data);
@@ -155,7 +157,7 @@ where
     T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
 {
     let arr_import: ArrImportFn = |arrow, world, entities| {
-        let data: Vec<T1> = arrow.to_vec().map_err(|x| x.to_string())?;
+        let data: Vec<T1> = deserialize_data(arrow);
         let data = data.into_iter().map(|x| x.into());
         let temp_data: Vec<(Entity, T)> =
             entities.iter().map(|x| *x).zip(data.into_iter()).collect();
@@ -210,7 +212,7 @@ where
             .iter()
             .map(|x| world.get::<T>(*x).unwrap())
             .collect();
-        let data = serde_arrow::to_arrow(&fields, v).unwrap();
+        let data = serailize_data(fields, v);
         Ok(ArrowColumn {
             fields: fields.to_vec(),
             data: data,
@@ -219,15 +221,50 @@ where
     arr_export
 }
 
+fn serailize_data<T>(fields: &[Arc<Field>], v: Vec<&T>) -> Vec<Arc<dyn Array>>
+where
+    T: Serialize + DeserializeOwned,
+{
+    let data = serde_arrow::to_arrow(&fields, &v);
+    let data = match data {
+        Ok(data) => data,
+        Err(_error) => serde_arrow::to_arrow(
+            &fields,
+            v.iter()
+                .map(|x| serde_arrow::utils::Item(x))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+    };
+    data
+}
+fn serailize_data_owned<T>(fields: &[Arc<Field>], v: Vec<T>) -> Vec<Arc<dyn Array>>
+where
+    T: Serialize + DeserializeOwned,
+{
+    let data = serde_arrow::to_arrow(&fields, &v);
+    let data = match data {
+        Ok(data) => data,
+        Err(_error) => serde_arrow::to_arrow(
+            &fields,
+            v.iter()
+                .map(|x| serde_arrow::utils::Item(x))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+    };
+    data
+}
 fn build_export<T>(mode: SnapshotMode) -> ArrExportFn
 where
     T: Serialize + DeserializeOwned + Component + Default,
 {
     let arr_export: ArrExportFn = match mode {
         SnapshotMode::Full => build_export_full::<T>(),
-        _ => |fields, _world, entities| {
+        _ => |_fields, _world, entities| {
+            let fields = &<Vec<FieldRef> as DefaultSchema>::default_schema::<TagHolder>();
             let v: Vec<_> = entities.iter().map(|_x| TagHolder::default()).collect();
-            let data = serde_arrow::to_arrow(&fields, v).unwrap();
+            let data = serailize_data_owned(fields, v);
             Ok(ArrowColumn {
                 fields: fields.to_vec(),
                 data: data,
@@ -246,7 +283,7 @@ where
             .iter()
             .map(|x| T1::from(world.get::<T>(*x).unwrap()))
             .collect();
-        let data = serde_arrow::to_arrow(&fields, v).unwrap();
+        let data = serailize_data_owned(fields, v);
         Ok(ArrowColumn {
             fields: fields.to_vec(),
             data: data,
@@ -262,9 +299,10 @@ where
 {
     let arr_export: ArrExportFn = match mode {
         SnapshotMode::Full => build_export_wrapper_full::<T, T1>(),
-        _ => |fields, _world, entities| {
+        _ => |_fields, _world, entities| {
+            let fields = &<Vec<FieldRef> as DefaultSchema>::default_schema::<TagHolder>();
             let v: Vec<_> = entities.iter().map(|_x| TagHolder::default()).collect();
-            let data = serde_arrow::to_arrow(&fields, v).unwrap();
+            let data = serailize_data_owned(fields, v);
             Ok(ArrowColumn {
                 fields: fields.to_vec(),
                 data: data,
@@ -280,7 +318,7 @@ where
     T: Serialize + DeserializeOwned + Component,
 {
     let arr_dyn_ctor: ArrDynFn = |arrow, bump, world| {
-        let data: Vec<T> = arrow.to_vec().unwrap();
+        let data = deserialize_data(arrow);
         let data = data
             .into_iter()
             .map(|component| {
@@ -291,6 +329,23 @@ where
         Ok(data)
     };
     arr_dyn_ctor
+}
+
+fn deserialize_data<T>(arrow: &ArrowColumn) -> Vec<T>
+where
+    T: DeserializeOwned,
+{
+    let data = arrow.to_vec::<T>();
+    let data = match data {
+        Ok(data) => data,
+        Err(_e) => arrow
+            .to_vec::<Item<T>>()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.0)
+            .collect(),
+    };
+    data
 }
 
 fn build_dyn_ctor<T>(mode: SnapshotMode) -> ArrDynFn
@@ -319,7 +374,7 @@ where
     T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
 {
     let arr_dyn_ctor: ArrDynFn = |arrow, bump, world| {
-        let data: Vec<T1> = arrow.to_vec().unwrap();
+        let data: Vec<T1> = deserialize_data(arrow);
         let data = data
             .into_iter()
             .map(|component| {

@@ -151,7 +151,8 @@ pub trait DefaultSchema {
         let ret: Result<Vec<FieldRef>, _> = Vec::from_type::<T>(TracingOptions::default());
         match ret {
             Ok(fields) => fields,
-            Err(_e) => Vec::from_type::<Item<T>>(TracingOptions::default()).unwrap(),
+            Err(_e) => Vec::from_type::<Item<T>>(TracingOptions::default().allow_null_fields(true))
+                .unwrap(),
         }
     }
     fn forced_null_schema<'de, T: Deserialize<'de>>(mode: SnapshotMode) -> Vec<FieldRef> {
