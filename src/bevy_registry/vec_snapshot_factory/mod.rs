@@ -15,9 +15,9 @@ use serde_arrow::utils::Item;
 use serde_json::Value;
 
 mod factory;
-pub use factory::ArrowSnapshotFactory;
-
 use crate::prelude::SnapshotMode;
+pub use factory::ArrowSnapshotFactory;
+pub use factory::SnapshotError;
 
 pub type ArrowToJsonFn = fn(&ArrowColumn) -> Result<Vec<serde_json::Value>, String>;
 pub type JsonToArrowFn = fn(&[FieldRef], &Vec<serde_json::Value>) -> Result<ArrowColumn, String>;
@@ -84,43 +84,53 @@ impl ArrowColumn {
     //     Ok(d)
     // }
 
-    pub fn to_vec<T>(&self) -> Result<Vec<T>, String>
+    pub fn to_vec<T>(&self) -> Result<Vec<T>, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de>,
     {
-        serde_arrow::from_arrow(&self.fields, &self.data).map_err(|e| e.to_string())
+        let data: Vec<T> = serde_arrow::from_arrow(&self.fields, &self.data)?;
+        Ok(data)
     }
-    pub fn from_slice_option<T>(v: &[T], fields: &[FieldRef]) -> Result<Self, String>
+    pub fn from_slice_option<T>(
+        v: &[T],
+        fields: &[FieldRef],
+    ) -> Result<Self, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de> + Serialize,
     {
-        let data = serde_arrow::to_arrow(&fields, v).unwrap();
+        let data = serde_arrow::to_arrow(&fields, v)?;
         Ok(Self {
             fields: fields.to_vec(),
             data,
         })
     }
-    pub fn from_slice<T>(v: &[T]) -> Result<Self, String>
+    pub fn from_slice<T>(v: &[T]) -> Result<Self, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de> + Serialize,
     {
-        let fields = Vec::from_type::<T>(TracingOptions::default()).unwrap();
-        let data = serde_arrow::to_arrow(&fields, v).unwrap();
+        let fields = Vec::from_type::<T>(TracingOptions::default())?;
+        let data = serde_arrow::to_arrow(&fields, v)?;
         Ok(Self { fields, data })
     }
 }
 
 pub trait JsonConversion {
-    fn from_json<T>(json: &Vec<Value>, fields: Option<&[FieldRef]>) -> Result<Self, String>
+    fn from_json<T>(
+        json: &Vec<Value>,
+        fields: Option<&[FieldRef]>,
+    ) -> Result<Self, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de> + Serialize,
         Self: Sized;
-    fn to_json<T>(&self) -> Result<Vec<serde_json::Value>, String>
+    fn to_json<T>(&self) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de> + Serialize;
 }
 impl JsonConversion for ArrowColumn {
-    fn from_json<T>(json: &Vec<Value>, fields: Option<&[FieldRef]>) -> Result<Self, String>
+    fn from_json<T>(
+        json: &Vec<Value>,
+        fields: Option<&[FieldRef]>,
+    ) -> Result<Self, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de> + Serialize,
         Self: Sized,
@@ -134,15 +144,15 @@ impl JsonConversion for ArrowColumn {
         a
     }
 
-    fn to_json<T>(&self) -> Result<Vec<serde_json::Value>, String>
+    fn to_json<T>(&self) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>>
     where
         T: for<'de> Deserialize<'de> + Serialize,
     {
         let items: Vec<T> = self.to_vec()?;
-        let v = items
+        let v: Vec<Value> = items
             .iter()
-            .map(|x| serde_json::to_value(x).unwrap())
-            .collect();
+            .map(|x| serde_json::to_value(x))
+            .collect::<Result<_, _>>()?;
         Ok(v)
     }
 }

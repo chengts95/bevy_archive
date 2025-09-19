@@ -188,7 +188,7 @@ fn main() {
     // 注册组件类型
     let registry = setup_registry();
 
-    let arrow = WorldArrowSnapshot::from_world_reg(&world, &registry);
+    let arrow = WorldArrowSnapshot::from_world_reg(&world, &registry).unwrap();
     let data = WorldBinArchSnapshot::from(arrow);
     let final_data = rmp_serde::to_vec(&data).unwrap();
     let data: WorldBinArchSnapshot = rmp_serde::from_slice(&final_data).unwrap();

@@ -14,7 +14,8 @@ pub enum BinFormat {
 use crate::{
     arrow_snapshot::{ComponentTable, EntityID},
     prelude::{
-        DeferredEntityBuilder, SnapshotMode, SnapshotRegistry, vec_snapshot_factory::RawTData,
+        DeferredEntityBuilder, SnapshotMode, SnapshotRegistry,
+        vec_snapshot_factory::{RawTData, SnapshotError},
     },
 };
 #[derive(Debug, Clone, Default)]
@@ -30,106 +31,129 @@ impl WorldArrowSnapshot {
         data: &HashMap<String, BinBlob>,
         world: &mut World,
         reg: &SnapshotRegistry,
-    ) {
-        let loadable_resource = data.keys();
-        for res in loadable_resource {
-            let factory = reg.get_res_factory(res);
-            match factory {
+    ) -> Result<(), SnapshotError> {
+        for res in data.keys() {
+            match reg.get_res_factory(res) {
                 Some(factory) => {
-                    let value: serde_json::Value = rmp_serde::from_slice(&data[res].0).unwrap();
-                    (factory.js_value.import)(&value, world, Entity::from_raw(0)).unwrap();
+                    let blob = data.get(res).ok_or_else(|| {
+                        SnapshotError::Generic(format!("Missing binary blob for resource {res}"))
+                    })?;
+
+                    let value: serde_json::Value = rmp_serde::from_slice(&blob.0).map_err(|e| {
+                        SnapshotError::Generic(format!("Deserialization failed: {e}"))
+                    })?;
+
+                    (factory.js_value.import)(&value, world, Entity::from_raw(0)).map_err(|e| {
+                        SnapshotError::Generic(format!("Import for resource {res} failed: {e:?}"))
+                    })?;
                 }
                 None => {
-                    //may need to emit warnings here
+                    println!("No factory found for resource `{res}`, skipping.");
                 }
             }
         }
+        Ok(())
     }
+
     pub fn save_archetypes<'a, I>(
-        world: &World,
-        registry: &SnapshotRegistry,
+        world: &'a World,
+        registry: &'a SnapshotRegistry,
         archetypes: I,
-        reg_comp_ids: HashMap<ComponentId, &str>,
-    ) -> impl Iterator<Item = ComponentTable>
+        reg_comp_ids: HashMap<ComponentId, &'a str>,
+    ) -> impl Iterator<Item = Result<ComponentTable, SnapshotError>> + 'a
     where
-        I: Iterator<Item = &'a Archetype>,
+        I: Iterator<Item = &'a Archetype> + 'a,
     {
-        let snap = archetypes.map(move |archetype| {
+        archetypes.map(move |archetype| {
             let can_be_stored = archetype
                 .components()
                 .any(|x| reg_comp_ids.contains_key(&x));
+
             if !can_be_stored {
-                return ComponentTable::default();
+                return Ok(ComponentTable::default());
             }
+
             let mut archetype_snapshot = ComponentTable::default();
             let entities: Vec<_> = archetype.entities().iter().map(|x| x.id()).collect();
-            let entities_ids: Vec<_> = archetype
-                .entities()
+
+            let entities_ids: Vec<_> = entities
                 .iter()
-                .map(|x| (EntityID { id: x.id().index() }))
+                .map(|&id| EntityID { id: id.index() })
                 .collect();
-            archetype_snapshot.entities.extend(entities_ids.as_slice());
+            archetype_snapshot.entities.extend(entities_ids);
 
-            archetype.components().for_each(|x| {
-                if reg_comp_ids.contains_key(&x) {
-                    let type_name = reg_comp_ids[&x];
-                    // let t = archetype.get_storage_type(x).map(|x| match x {
-                    //     StorageType::Table => StorageTypeFlag::Table,
-                    //     StorageType::SparseSet => StorageTypeFlag::SparseSet,
-                    // });
-                    let arrow = &registry.get_factory(type_name).unwrap().arrow;
-                    let arrow = arrow.as_ref().unwrap();
-                    let column = (arrow.arr_export)(&arrow.schema, &world, &entities);
-                    archetype_snapshot.insert_column(type_name, column.unwrap());
+            for cid in archetype.components() {
+                if let Some(&type_name) = reg_comp_ids.get(&cid) {
+                    let arrow = registry
+                        .get_factory(type_name)
+                        .and_then(|f| f.arrow.as_ref())
+                        .ok_or_else(|| SnapshotError::MissingFactory(type_name.to_string()))?;
+
+                    let column = (arrow.arr_export)(&arrow.schema, world, &entities)?;
+                    archetype_snapshot.insert_column(type_name, column);
                 }
-            });
-
-            archetype_snapshot
-        });
-        snap
-    }
-    pub fn save_world_resource(world: &World, reg: &SnapshotRegistry) -> HashMap<String, BinBlob> {
-        let mut map = HashMap::new();
-        let saveable_resource = reg.resource_entries.keys();
-        for res in saveable_resource {
-            let value =
-                (reg.get_res_factory(res).unwrap().js_value.export)(world, Entity::from_raw(0));
-            if let Some(value) = value {
-                let bin = BinBlob(rmp_serde::to_vec(&value).unwrap());
-                map.insert(res.to_string(), bin);
             }
+
+            Ok(archetype_snapshot)
+        })
+    }
+
+    pub fn save_world_resource(
+        world: &World,
+        reg: &SnapshotRegistry,
+    ) -> Result<HashMap<String, BinBlob>, SnapshotError> {
+        let mut map = HashMap::new();
+
+        for res in reg.resource_entries.keys() {
+            let factory = reg
+                .get_res_factory(res)
+                .ok_or_else(|| SnapshotError::MissingFactory(res.to_string()))?;
+
+            let value = (factory.js_value.export)(world, Entity::from_raw(0))
+                .ok_or_else(|| SnapshotError::Generic(format!("resource {res} export failed")))?;
+
+            let bin = BinBlob(
+                rmp_serde::to_vec(&value)
+                    .map_err(|e| SnapshotError::Generic(format!("rmp encode error: {e}")))?,
+            );
+            map.insert(res.to_string(), bin);
         }
-        map
+
+        Ok(map)
     }
 }
+
 fn count_entities(snapshot: &[u32]) -> u32 {
     unsafe { *snapshot.iter().max().unwrap_unchecked() + 1 }
 }
 impl WorldArrowSnapshot {
     pub fn from_world(world: &World) -> Self {
         let reg = world.resource::<SnapshotRegistry>();
-        Self::from_world_reg(world, reg)
+        Self::from_world_reg(world, reg).unwrap()
     }
-    pub fn from_world_reg(world: &World, registry: &SnapshotRegistry) -> Self {
+    pub fn from_world_reg(
+        world: &World,
+        registry: &SnapshotRegistry,
+    ) -> Result<Self, SnapshotError> {
         let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
 
         let reg_comp_ids: HashMap<ComponentId, &str> = registry
             .type_registry
             .keys()
-            .filter_map(|&name| {
-                registry
-                    .comp_id_by_name(name, &world)
-                    .map(|cid| (cid, name))
-            })
+            .filter_map(|&name| registry.comp_id_by_name(name, world).map(|cid| (cid, name)))
             .collect();
+
         let mut world_snapshot = WorldArrowSnapshot::default();
         world_snapshot.entities = world.iter_entities().map(|x| x.id().index()).collect();
-        let snap = Self::save_archetypes(world, registry, archetypes, reg_comp_ids);
-        world_snapshot.archetypes = snap.collect();
-        world_snapshot.resources = Self::save_world_resource(world, registry);
 
-        world_snapshot
+        let snap = Self::save_archetypes(world, registry, archetypes, reg_comp_ids);
+        world_snapshot.archetypes = snap.collect::<Result<_, _>>()?;
+
+        world_snapshot.resources = Self::save_world_resource(world, registry)?;
+
+        Ok(world_snapshot)
     }
+
     pub fn to_world(&self, world: &mut World) {
         world.resource_scope(|world, reg: Mut<SnapshotRegistry>| self.to_world_reg(world, &reg))
     }
