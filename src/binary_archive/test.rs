@@ -188,3 +188,19 @@ fn test_full_roundtrip_with_arrow_and_manifest() {
     assert!(found >= 3, "Expected at least 3 Position entities");
     println!("✅ Binary roundtrip complete with {} Position entities", found);
 }
+
+
+
+#[test]
+fn test_snapshot_zip_roundtrip() {
+    let mut world = World::new();
+    let registry = setup_registry();
+    build_sample_world(&mut world);
+
+    let snapshot = WorldArrowSnapshot::from_world_reg(&world, &registry).unwrap();
+    let zip_data = snapshot.to_zip(Some(9)).unwrap();
+
+    std::fs::write("snapshot.zip", &zip_data).unwrap();
+
+    // 再考虑加 from_zip() 解压回 WorldArrowSnapshot（后续）
+}

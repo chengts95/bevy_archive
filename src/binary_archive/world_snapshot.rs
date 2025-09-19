@@ -2,6 +2,7 @@ use bevy_ecs::{component::ComponentId, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod sparse_entitiy_list;
 mod zip_snapshot;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
@@ -214,15 +215,25 @@ impl WorldArrowSnapshot {
 use bevy_ecs::archetype::Archetype;
 
 #[derive(Serialize, Clone, Debug, Default, Deserialize)]
-pub struct BinBlob(Vec<u8>);
+pub struct BinBlob(
+    #[serde(with = "serde_bytes")]
+    pub Vec<u8>);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorldBinArchSnapshot {
-    pub entities: Vec<u32>,
+    pub entities: sparse_entitiy_list::SparseU32List,
     pub archetypes: Vec<BinBlob>,
     pub resources: HashMap<String, BinBlob>,
     pub format: BinFormat,
     pub meta: HashMap<String, String>,
+}
+
+impl WorldBinArchSnapshot {
+    pub fn to_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+        rmp_serde::to_vec(self)
+    }
+
+    
 }
 impl From<WorldArrowSnapshot> for WorldBinArchSnapshot {
     fn from(value: WorldArrowSnapshot) -> Self {
@@ -231,8 +242,9 @@ impl From<WorldArrowSnapshot> for WorldBinArchSnapshot {
             .iter()
             .map(|x| BinBlob(x.to_parquet().unwrap()))
             .collect();
+        let entities = sparse_entitiy_list::SparseU32List::from_unsorted(value.entities);
         Self {
-            entities: value.entities,
+            entities,
             archetypes,
             resources: value.resources,
             format: BinFormat::Parquet,
@@ -255,7 +267,7 @@ impl From<WorldBinArchSnapshot> for WorldArrowSnapshot {
             .map(|x| ComponentTable::from_parquet_u8(&x.0).unwrap())
             .collect();
         Self {
-            entities: value.entities,
+            entities: value.entities.to_vec(),
             archetypes,
             resources: value.resources,
             meta: value.meta,
