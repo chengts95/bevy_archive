@@ -192,7 +192,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
         let entities: Vec<_> = archetype
             .entities()
             .iter()
-            .map(|x| (x.id().index()))
+            .map(|x| x.id().index())
             .collect();
         archetype_snapshot.entities.extend(entities.as_slice());
         let iter = entities;

@@ -86,10 +86,7 @@ impl Into<ChildOf> for ChildOfWrapper {
     }
 }
 
-#[derive(Debug, Component, Serialize, Deserialize, Clone)]
-struct Test {
-    pub v: Vec<i32>,
-}
+ 
 fn setup_registry() -> SnapshotRegistry {
     let mut registry = SnapshotRegistry::default();
     registry.register::<Position>();
