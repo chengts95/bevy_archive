@@ -9,8 +9,7 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 use crate::arrow_snapshot::ComponentTable;
 use crate::binary_archive::BinBlob;
 use crate::binary_archive::WorldArrowSnapshot;
-use crate::binary_archive::world_snapshot::sparse_entitiy_list;
-use crate::prelude::SnapshotRegistry;
+use crate::binary_archive::world_snapshot::sparse_entitiy_list; 
 use crate::prelude::vec_snapshot_factory::SnapshotError;
 
 impl WorldArrowSnapshot {
