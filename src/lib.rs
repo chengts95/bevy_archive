@@ -4,7 +4,7 @@ pub mod bevy_registry;
 pub mod csv_archive;
 pub mod entity_archive;
 
-#[cfg(feature="arrow_rs")]
+#[cfg(feature = "arrow_rs")]
 pub mod binary_archive;
 
 #[cfg(feature = "flecs")]

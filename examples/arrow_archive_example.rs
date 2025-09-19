@@ -1,18 +1,11 @@
-//! Basic example for the entity_snapshot archive system
+//! Basic example for the arrow_world_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
-
 use bevy_archive::{
-    arrow_snapshot::{ComponentTable, EntityID},
     binary_archive::{WorldArrowSnapshot, WorldBinArchSnapshot},
     prelude::*,
 };
-use bevy_ecs::{component::ComponentId, prelude::*};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_arrow::{
-    marrow::{self, datatypes::Field},
-    schema::SchemaLike,
-};
-use std::collections::HashMap;
 
 // === Test Components ===
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -26,7 +19,7 @@ struct Velocity {
     dy: f32,
 }
 
-#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq,Default)]
+#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 struct Tag;
 
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -67,15 +60,15 @@ impl Into<Vector2> for Vector2Wrapper {
 }
 
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
-pub struct TagWrapper{
-    value:bool
+pub struct TagWrapper {
+    value: bool,
 }
 impl From<&Tag> for TagWrapper {
     fn from(_p: &Tag) -> Self {
-        Self{value:true}
+        Self { value: true }
     }
 }
-impl From<TagWrapper> for Tag{
+impl From<TagWrapper> for Tag {
     fn from(_p: TagWrapper) -> Self {
         Self
     }
@@ -97,7 +90,7 @@ fn setup_registry() -> SnapshotRegistry {
     registry.register::<Position>();
     registry.register::<Velocity>();
 
-     registry.register_with_mode::<Tag>(SnapshotMode::Placeholder);
+    registry.register_with_mode::<Tag>(SnapshotMode::Placeholder);
     registry.register::<Inventory>();
     registry.register::<NestedComponent>();
     registry.register_with::<Vector2, Vector2Wrapper>();
@@ -183,18 +176,12 @@ fn build_sample_world(world: &mut World) -> Entity {
 //     println!("new archtypes len:{}", new_world.archetypes().len());
 //     println!("old archtypes len:{}", world.archetypes().len());
 // }
-use bevy_archive::bevy_registry::vec_snapshot_factory::*;
 
 #[derive(Debug, Component, Serialize, Deserialize, Clone)]
 struct Test {
     pub v: Vec<i32>,
 }
 fn main() {
-    use arrow::datatypes;
-
-    use serde_arrow::schema::TracingOptions;
-    use serde_arrow::to_arrow;
-
     // 初始化世界和组件数据
     let mut world = World::new();
     build_sample_world(&mut world);

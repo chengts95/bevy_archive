@@ -1,6 +1,6 @@
 use bevy_ecs::{
     component::ComponentId,
-    entity::{Entity, hash_set::Iter},
+    entity::Entity,
     world::{Mut, World},
 };
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,7 @@ pub enum BinFormat {
 use crate::{
     arrow_snapshot::{ComponentTable, EntityID},
     prelude::{
-        DeferredEntityBuilder, SnapshotFactory, SnapshotMode, SnapshotRegistry,
-        vec_snapshot_factory::RawTData,
+        DeferredEntityBuilder, SnapshotMode, SnapshotRegistry, vec_snapshot_factory::RawTData,
     },
 };
 #[derive(Debug, Clone, Default)]
