@@ -19,168 +19,169 @@ pub struct ComponentColumnGroup {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ColumnarCsv {
     pub headers: Vec<String>,
-    pub columns: Vec<Vec<serde_json::Value>>,
+    pub columns: Vec<Vec<Value>>,
     pub row_index: Vec<u32>,
+    #[serde(skip)]
     pub header_index_map: HashMap<String, usize>,
 }
 
 impl ColumnarCsv {
-    pub fn new() -> Self {
+    pub fn new(row_count: usize) -> Self {
         Self {
             headers: Vec::new(),
             columns: Vec::new(),
-            row_index: Vec::new(),
+            row_index: (0..row_count as u32).collect(),
             header_index_map: HashMap::new(),
         }
     }
-    pub fn append_columns<I>(&mut self, names: I) -> Result<(), String>
-    where
-        I: IntoIterator<Item = String>,
-    {
-        for name in names {
-            if self.header_index_map.contains_key(&name) {
-                return Err(format!("Column '{}' already exists", name));
-            }
 
-            let idx = self.headers.len();
-            self.header_index_map.insert(name.clone(), idx);
-            self.headers.push(name);
-
-            let row_count = self.row_index.len();
-            self.columns.push(vec![Value::Null; row_count]);
-        }
-
-        Ok(())
-    }
-    pub fn get_column(&self, name: &str) -> Option<&Vec<Value>> {
-        if let Some(idx) = self.header_index_map.get(name) {
-            Some(&self.columns[*idx])
-        } else {
-            None
-        }
-    }
-    pub fn get_column_mut(&mut self, name: &str) -> Option<&mut Vec<Value>> {
-        if let Some(idx) = self.header_index_map.get(name) {
-            Some(&mut self.columns[*idx])
-        } else {
-            None
-        }
-    }
-    pub fn add_column(&mut self, name: &String) -> Result<(), String> {
-        if self.header_index_map.contains_key(name) {
+    fn add_column(&mut self, name: String) -> Result<(), String> {
+        if self.header_index_map.contains_key(&name) {
             return Err(format!("Column '{}' already exists", name));
         }
-
         let idx = self.headers.len();
         self.headers.push(name.clone());
-        self.header_index_map.insert(name.clone(), idx);
-
-        let column_len = self.row_index.len();
-        self.columns.push(vec![Value::Null; column_len]);
-
+        self.header_index_map.insert(name, idx);
+        self.columns.push(vec![Value::Null; self.row_index.len()]);
         Ok(())
     }
-    pub fn set_row_count(&mut self, row_count: usize) {
-        for col in &mut self.columns {
-            if col.len() != row_count {
-                col.resize(row_count, Value::Null);
-            }
-        }
 
-        if self.row_index.len() < row_count {
-            let start = *self.row_index.last().unwrap_or(&0) as u32;
-            self.row_index
-                .extend(start..start + (row_count - self.row_index.len()) as u32);
+    fn add_columns<I: IntoIterator<Item = String>>(&mut self, names: I) -> Result<(), String> {
+        for n in names {
+            self.add_column(n)?;
         }
+        Ok(())
     }
-}
-pub unsafe fn columnar_from_snapshot_unchecked(snapshot: &ArchetypeSnapshot) -> ColumnarCsv {
-    let schemas: Vec<ComponentColumnGroup> = snapshot
-        .columns
-        .iter()
-        .zip(snapshot.component_types.iter())
-        .map(|(col, name)| infer_schema(name, col.first().unwrap()))
-        .collect();
 
-    let cols = schemas.iter().flat_map(|s| s.fields.iter().cloned());
-    let mut csv = ColumnarCsv::new();
-    csv.set_row_count(snapshot.entities.len());
-    csv.append_columns(cols).unwrap();
-    csv.row_index.clone_from(&snapshot.entities());
+    pub fn get_column_mut(&mut self, name: &str) -> Option<&mut Vec<Value>> {
+        self.header_index_map
+            .get(name)
+            .map(|&i| &mut self.columns[i])
+    }
 
-    for (values, schema) in snapshot.columns.iter().zip(schemas) {
-        for field in &schema.fields {
-            let suffix = field
-                .strip_prefix(&format!("{}.", schema.component))
-                .unwrap();
-            let col = csv.get_column_mut(field).unwrap();
+    pub fn to_csv<W: Write>(&self, mut w: W) -> IoResult<()> {
+        let mut writer = csv::Writer::from_writer(&mut w);
+        writer
+            .write_record(std::iter::once("id").chain(self.headers.iter().map(|s| s.as_str())))?;
 
-            for (idx, item) in values.iter().enumerate() {
-                if let Value::Object(map) = item {
-                    if let Some(v) = map.get(suffix) {
-                        col[idx] = v.clone();
-                    }
+        for (row, &id) in self.row_index.iter().enumerate() {
+            let mut record = Vec::with_capacity(self.headers.len() + 1);
+            record.push(id.to_string());
+            for col in &self.columns {
+                let v = &col[row];
+                record.push(if v.is_null() {
+                    "".into()
                 } else {
-                    col[idx] = item.clone(); // 整体结构
-                }
+                    v.to_string()
+                });
             }
+            writer.write_record(&record)?;
         }
+        writer.flush()
     }
 
-    csv
+    pub fn from_csv<R: Read>(r: R) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut reader = csv::Reader::from_reader(r);
+        let mut headers: Vec<String> = reader.headers()?.iter().map(|s| s.to_string()).collect();
+        assert_eq!(headers.first().map(String::as_str), Some("id"));
+        headers.remove(0);
+
+        let mut row_index = Vec::new();
+        let mut columns = vec![Vec::new(); headers.len()];
+
+        for rec in reader.records() {
+            let rec = rec?;
+            row_index.push(rec[0].parse::<u32>()?);
+            for (j, f) in rec.iter().skip(1).enumerate() {
+                let v = if f.trim().is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_str(f).unwrap_or(Value::String(f.to_string()))
+                };
+                columns[j].push(v);
+            }
+        }
+
+        let header_index_map = headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (h.clone(), i))
+            .collect();
+
+        Ok(Self {
+            headers,
+            columns,
+            row_index,
+            header_index_map,
+        })
+    }
 }
 impl From<&ArchetypeSnapshot> for ColumnarCsv {
     fn from(snap: &ArchetypeSnapshot) -> Self {
         columnar_from_snapshot(snap)
     }
 }
-pub fn columnar_from_snapshot(snapshot: &ArchetypeSnapshot) -> ColumnarCsv {
-    let schemas: Vec<_> = snapshot
+
+fn build_schema(snapshot: &ArchetypeSnapshot, strict: bool) -> Vec<ComponentColumnGroup> {
+    snapshot
         .columns
         .iter()
         .zip(snapshot.component_types.iter())
-        .map(|(col, type_name)| {
-            let mut set: HashSet<_> = HashSet::new();
-            col.iter()
-                .map(|x| infer_schema(type_name, x))
-                .for_each(|x| {
-                    set.extend(x.fields.iter().cloned());
-                });
-            let final_schema = ComponentColumnGroup {
-                component: type_name.to_string(),
-                fields: set.into_iter().collect(),
+        .map(|(col, comp)| {
+            let fields: Vec<String> = if strict {
+                // 扫描所有行，收集完整字段集合
+                let mut set = HashSet::new();
+                for v in col {
+                    set.extend(infer_schema(comp, v).fields);
+                }
+                set.into_iter().collect()
+            } else {
+                // 只看第一行，假定 schema 固定
+                infer_schema(comp, col.first().unwrap()).fields
             };
-            final_schema
+            ComponentColumnGroup {
+                component: comp.clone(),
+                fields,
+            }
         })
-        .collect();
-    //这个for循环之前足以在csv里构造出所有的列并进行类似的dataframe操作
-    let cols = schemas
-        .iter()
-        .flat_map(|x| x.fields.iter().map(|x| x.clone()));
-    let mut csv = ColumnarCsv::new();
-    csv.set_row_count(snapshot.entities.len());
-    csv.append_columns(cols).unwrap();
+        .collect()
+}
+
+pub fn columnar_from_snapshot(snapshot: &ArchetypeSnapshot) -> ColumnarCsv {
+    columnar_core(snapshot, true) // strict
+}
+
+pub unsafe fn columnar_from_snapshot_unchecked(snapshot: &ArchetypeSnapshot) -> ColumnarCsv {
+    columnar_core(snapshot, false) // fast but unsafe
+}
+
+fn columnar_core(snapshot: &ArchetypeSnapshot, strict: bool) -> ColumnarCsv {
+    let schemas = build_schema(snapshot, strict);
+
+    let mut csv = ColumnarCsv::new(snapshot.entities.len());
+    csv.add_columns(schemas.iter().flat_map(|s| s.fields.clone()))
+        .unwrap();
     csv.row_index.clone_from(&snapshot.entities());
 
+    // 填充数据
     for (values, schema) in snapshot.columns.iter().zip(schemas) {
-        for name in &schema.fields {
-            let a = name
-                .strip_prefix(format!("{}.", schema.component).as_str())
+        for field in schema.fields {
+            let suffix = field
+                .strip_prefix(&format!("{}.", schema.component))
                 .unwrap_or("");
-            let col = csv.get_column_mut(name).unwrap();
-            for (idx, item) in values.iter().enumerate() {
-                if item.is_object() {
-                    if let Some(v) = item.get(a) {
-                        col[idx] = v.clone();
-                    }
+            let col = csv.get_column_mut(&field).unwrap();
+            for (i, item) in values.iter().enumerate() {
+                col[i] = if let Value::Object(map) = item {
+                    map.get(suffix).cloned().unwrap_or(Value::Null)
                 } else {
-                    col[idx] = item.clone();
-                }
+                    item.clone()
+                };
             }
         }
     }
     csv
 }
+
 pub fn infer_schema(component: &str, value: &Value) -> ComponentColumnGroup {
     match value {
         Value::Object(map) => {
