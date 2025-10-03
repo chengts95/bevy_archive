@@ -1,4 +1,4 @@
-use bevy_ecs::{entity::EntityRow, prelude::*};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 #[derive(Debug, Deserialize)]

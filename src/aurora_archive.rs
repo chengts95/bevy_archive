@@ -393,6 +393,7 @@ impl From<&WorldArchSnapshot> for WorldWithAurora {
 }
 
 impl From<&WorldWithAurora> for WorldArchSnapshot {
+    #[allow(unreachable_patterns)]
     fn from(world: &WorldWithAurora) -> Self {
         let mut archetypes = Vec::new();
         let mut all_entities: BTreeSet<u32> = BTreeSet::new();
