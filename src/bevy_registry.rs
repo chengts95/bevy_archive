@@ -155,7 +155,9 @@ impl SnapshotRegistry {
     pub fn get_factory(&self, name: &str) -> Option<&SnapshotFactory> {
         self.entries.get(name)
     }
-
+   pub fn get_factory_mut(&mut self, name: &str) -> Option<&mut SnapshotFactory> {
+        self.entries.get_mut(name)
+    }
     pub fn comp_id_by_name(&self, name: &str, world: &World) -> Option<ComponentId> {
         self.entries
             .get(name)

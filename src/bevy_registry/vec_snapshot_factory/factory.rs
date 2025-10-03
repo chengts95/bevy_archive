@@ -40,6 +40,7 @@ pub struct ArrowSnapshotFactory {
     pub arr_dyn: ArrDynFn,
     pub schema: Vec<FieldRef>,
 }
+
 impl ArrowSnapshotFactory {
     pub fn new_with<T>(mode: SnapshotMode) -> Self
     where
