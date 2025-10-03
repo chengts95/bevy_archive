@@ -67,7 +67,7 @@ impl From<&ChildOf> for ChildOfWrapper {
 }
 impl Into<ChildOf> for ChildOfWrapper {
     fn into(self) -> ChildOf {
-        ChildOf(Entity::from_raw_u32(self.0).unwrap())
+        ChildOf(Entity::from_raw_u32(self.0 as u32).unwrap())
     }
 }
 fn setup_registry() -> SnapshotRegistry {

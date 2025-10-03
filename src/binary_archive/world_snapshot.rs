@@ -1,4 +1,4 @@
-use bevy_ecs::{component::ComponentId, prelude::*};
+use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -12,6 +12,7 @@ pub enum BinFormat {
     MsgPack,
 }
 use crate::{
+    archetype_archive::WorldExt,
     arrow_snapshot::{ComponentTable, EntityID},
     prelude::{
         DeferredEntityBuilder, SnapshotMode, SnapshotRegistry,
@@ -43,9 +44,12 @@ impl WorldArrowSnapshot {
                         SnapshotError::Generic(format!("Deserialization failed: {e}"))
                     })?;
 
-                    (factory.js_value.import)(&value, world, Entity::from_raw(0)).map_err(|e| {
-                        SnapshotError::Generic(format!("Import for resource {res} failed: {e:?}"))
-                    })?;
+                    (factory.js_value.import)(&value, world, Entity::from_raw_u32(0).unwrap())
+                        .map_err(|e| {
+                            SnapshotError::Generic(format!(
+                                "Import for resource {res} failed: {e:?}"
+                            ))
+                        })?;
                 }
                 None => {
                     println!("No factory found for resource `{res}`, skipping.");
@@ -67,6 +71,7 @@ impl WorldArrowSnapshot {
         archetypes.map(move |archetype| {
             let can_be_stored = archetype
                 .components()
+                .iter()
                 .any(|x| reg_comp_ids.contains_key(&x));
 
             if !can_be_stored {
@@ -109,7 +114,7 @@ impl WorldArrowSnapshot {
                 .get_res_factory(res)
                 .ok_or_else(|| SnapshotError::MissingFactory(res.to_string()))?;
 
-            let value = (factory.js_value.export)(world, Entity::from_raw(0))
+            let value = (factory.js_value.export)(world, Entity::from_raw_u32(0).unwrap())
                 .ok_or_else(|| SnapshotError::Generic(format!("resource {res} export failed")))?;
 
             let bin = BinBlob(
@@ -144,7 +149,7 @@ impl WorldArrowSnapshot {
             .collect();
 
         let mut world_snapshot = WorldArrowSnapshot::default();
-        world_snapshot.entities = world.iter_entities().map(|x| x.id().index()).collect();
+        world_snapshot.entities = WorldExt::iter_entities(world).map(|x| x.index()).collect();
 
         let snap = Self::save_archetypes(world, registry, archetypes, reg_comp_ids);
         world_snapshot.archetypes = snap.collect::<Result<_, _>>()?;
@@ -189,7 +194,7 @@ impl WorldArrowSnapshot {
             for id in archetype.entities.iter().rev() {
                 let entity = world
                     .entities()
-                    .resolve_from_id(id.id)
+                    .resolve_from_id(EntityRow::from_raw_u32(id.id as u32).unwrap())
                     .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
                 let mut builder = DeferredEntityBuilder::new(world, &bump, entity);
                 for (mode, raw) in &mut columns {
@@ -215,9 +220,7 @@ impl WorldArrowSnapshot {
 use bevy_ecs::archetype::Archetype;
 
 #[derive(Serialize, Clone, Debug, Default, Deserialize)]
-pub struct BinBlob(
-    #[serde(with = "serde_bytes")]
-    pub Vec<u8>);
+pub struct BinBlob(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorldBinArchSnapshot {
@@ -232,8 +235,6 @@ impl WorldBinArchSnapshot {
     pub fn to_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
         rmp_serde::to_vec(self)
     }
-
-    
 }
 impl From<WorldArrowSnapshot> for WorldBinArchSnapshot {
     fn from(value: WorldArrowSnapshot) -> Self {
