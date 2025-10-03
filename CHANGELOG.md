@@ -1,5 +1,5 @@
 # Changelog
-## [0.3.0] - 2024-05-14
+## [0.3.0] - 2024-10-04
 - Initial support for Arrow, parquet and binary format.
 
 ## [0.1.4] - 2024-05-14
