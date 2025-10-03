@@ -1,4 +1,4 @@
-use bevy_ecs::prelude::*;
+use bevy_ecs::{entity::EntityRow, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 #[derive(Debug, Deserialize)]
@@ -33,7 +33,7 @@ impl WorldSnapshot {
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
-use crate::bevy_registry::SnapshotRegistry;
+use crate::{archetype_archive::WorldExt, bevy_registry::SnapshotRegistry};
 
 /// JSON → TOML
 pub fn json_to_toml(json: &JsonValue) -> Result<TomlValue, String> {
@@ -48,12 +48,12 @@ pub fn toml_to_json(toml: &TomlValue) -> Result<JsonValue, String> {
 
 pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapshot {
     let mut entities_snapshot = Vec::new();
-    for e in world.iter_entities() {
+    for e in WorldExt::iter_entities(world) {
         let mut es = EntitySnapshot::default();
-        es.id = e.id().index() as u64;
+        es.id = e.index() as u64;
         for key in reg.type_registry.keys() {
             if let Some(func) = reg.get_factory(key).map(|x| x.js_value.export) {
-                if let Some(value) = func(world, e.id()) {
+                if let Some(value) = func(world, e) {
                     es.components.push(ComponentSnapshot {
                         r#type: key.to_string(),
                         value,
@@ -76,7 +76,7 @@ pub fn load_world_snapshot(world: &mut World, snapshot: &WorldSnapshot, reg: &Sn
     world.entities().reserve_entities((max_id + 1) as u32);
     world.flush();
     for e in &snapshot.entities {
-        let entity = Entity::from_raw(e.id as u32);
+        let entity = Entity::from_raw_u32(e.id as u32).unwrap();
         for c in &e.components {
             reg.get_factory(&c.r#type.as_str())
                 .map(|x| x.js_value.import)
