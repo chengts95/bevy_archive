@@ -197,10 +197,20 @@ fn test_snapshot_zip_roundtrip() {
     let registry = setup_registry();
     build_sample_world(&mut world);
 
-    let snapshot = WorldArrowSnapshot::from_world_reg(&world, &registry).unwrap();
+    // 1. 保存 snapshot
+    let mut snapshot = WorldArrowSnapshot::from_world_reg(&world, &registry).unwrap();
     let zip_data = snapshot.to_zip(Some(9)).unwrap();
 
     std::fs::write("snapshot.zip", &zip_data).unwrap();
 
-    // 再考虑加 from_zip() 解压回 WorldArrowSnapshot（后续）
+    // 2. 读取 snapshot
+    let snapshot2 = WorldArrowSnapshot::from_zip(&zip_data).unwrap();
+    snapshot.entities.sort();
+    // 3. 基本断言，验证 roundtrip 成功
+    assert_eq!(snapshot.entities, snapshot2.entities);
+    assert_eq!(snapshot.resources.len(), snapshot2.resources.len());
+    assert_eq!(snapshot.archetypes.len(), snapshot2.archetypes.len());
+
+    // 甚至可以更细：比对 meta
+    assert_eq!(snapshot.meta, snapshot2.meta);
 }
