@@ -9,8 +9,39 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 use crate::arrow_snapshot::ComponentTable;
 use crate::binary_archive::BinBlob;
 use crate::binary_archive::WorldArrowSnapshot;
-use crate::binary_archive::world_snapshot::sparse_entitiy_list; 
+use crate::binary_archive::world_snapshot::sparse_entitiy_list;
+use crate::binary_archive::world_snapshot::sparse_entitiy_list::SparseU32List;
 use crate::prelude::vec_snapshot_factory::SnapshotError;
+ 
+const META_TOML: &str = "meta.toml";
+const ENTITIES_MSGPACK: &str = "entities.msgpack";
+const RESOURCES_PREFIX: &str = "resources/";
+const RESOURCES_SUFFIX: &str = ".msgpack";
+const ARCHETYPES_PREFIX: &str = "archetypes/";
+const ARCHETYPES_SUFFIX: &str = ".parquet";
+
+ 
+#[inline]
+fn resource_path(key: &str) -> String {
+    format!("{RESOURCES_PREFIX}{key}{RESOURCES_SUFFIX}")
+}
+#[inline]
+fn archetype_path(idx: usize) -> String {
+    format!("{ARCHETYPES_PREFIX}arch_{idx}{ARCHETYPES_SUFFIX}")
+}
+#[inline]
+fn parse_resource_key(path: &str) -> Option<&str> {
+    path.strip_prefix(RESOURCES_PREFIX)?
+        .strip_suffix(RESOURCES_SUFFIX)
+}
+#[inline]
+fn parse_archetype_idx(path: &str) -> Option<usize> {
+    path.strip_prefix(ARCHETYPES_PREFIX)?
+        .strip_prefix("arch_")?
+        .strip_suffix(ARCHETYPES_SUFFIX)?
+        .parse()
+        .ok()
+}
 
 impl WorldArrowSnapshot {
     pub fn to_zip(&self, level: Option<i64>) -> Result<Vec<u8>, Box<dyn Error>> {
@@ -21,28 +52,29 @@ impl WorldArrowSnapshot {
         let options = SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .compression_level(level);
-        // 1. 写 meta.toml
+
+        // 1. meta
         let meta_toml = toml::to_string(&self.meta)
             .map_err(|e| SnapshotError::Generic(format!("toml encode error: {e}")))?;
-        zip.start_file("meta.toml", options)?;
+        zip.start_file(META_TOML, options)?;
         zip.write_all(meta_toml.as_bytes())?;
 
-        // 2. 写 entities
+        // 2. entities
         let entity_bytes = sparse_entitiy_list::SparseU32List::from_unsorted(self.entities.clone());
-        zip.start_file("entities.msgpack", options)?;
+        zip.start_file(ENTITIES_MSGPACK, options)?;
         zip.write_all(&rmp_serde::to_vec(&entity_bytes)?)?;
 
-        // 3. 写资源
+        // 3. resources
         for (key, blob) in &self.resources {
-            let path = format!("resources/{key}.msgpack");
-            zip.start_file(path, options)?;
+            let path = resource_path(key);
+            zip.start_file(&path, options)?;
             zip.write_all(&blob.0)?;
         }
 
-        // 4. 写 archetypes
+        // 4. archetypes
         for (idx, arch) in self.archetypes.iter().enumerate() {
-            let name = format!("archetypes/arch_{idx}.parquet");
-            zip.start_file(name, options)?;
+            let name = archetype_path(idx);
+            zip.start_file(&name, options)?;
             let parquet_data = arch.to_parquet()?;
             zip.write_all(&parquet_data)?;
         }
@@ -68,28 +100,25 @@ impl WorldArrowSnapshot {
             let mut file = zip
                 .by_index(i)
                 .map_err(|x| SnapshotError::Generic(x.to_string()))?;
-            let name = file.name().to_string();
+            let name = file.name().to_owned();
 
-            let mut buf = vec![];
-            file.read(&mut buf)
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
                 .map_err(|x| SnapshotError::Generic(x.to_string()))?;
 
-            if name == "meta.toml" {
+            if name == META_TOML {
                 meta = Some(
-                    toml::from_str(unsafe { str::from_utf8_unchecked(&buf) })
+                    toml::from_str(std::str::from_utf8(&buf).unwrap())
                         .map_err(|e| SnapshotError::Generic(format!("toml decode error: {e}")))?,
                 );
-            } else if name == "entities.msgpack" {
+            } else if name == ENTITIES_MSGPACK {
                 let raw: &[u8] = &buf;
-                let ent: Vec<u32> = rmp_serde::from_slice(raw)
-                    .map_err(|x| SnapshotError::Generic(x.to_string()))?;
-                entities = Some(ent.iter().copied().collect());
-            } else if name.starts_with("resources/") && name.ends_with(".msg") {
-                let key = name
-                    .trim_start_matches("resources/")
-                    .trim_end_matches(".msgpack");
+                let ent: SparseU32List = rmp_serde::from_slice(raw)
+                    .map_err(|x| SnapshotError::Generic(format!("msgpack decode error: {x}")))?;
+                entities = Some(ent.to_vec().iter().copied().collect());
+            } else if let Some(key) = parse_resource_key(&name) {
                 resources.insert(key.to_string(), BinBlob(buf));
-            } else if name.starts_with("archetypes/") && name.ends_with(".parquet") {
+            } else if let Some(_idx) = parse_archetype_idx(&name) {
                 let table = ComponentTable::from_parquet_u8(&buf)?;
                 archetypes.push(table);
             } else {
