@@ -1,4 +1,6 @@
 # Changelog
+## [0.2.0]  
+- Initial support for binary, arrow and parquet format.
 
 ## [0.1.4] - 2024-05-14
 - Initial support for singleton/resource.
