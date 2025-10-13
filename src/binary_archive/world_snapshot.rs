@@ -200,10 +200,10 @@ impl WorldArrowSnapshot {
                 for (mode, raw) in &mut columns {
                     let ptr = raw.data.pop().unwrap();
                     match mode {
-                        SnapshotMode::Full | SnapshotMode::Placeholder => {
+                        SnapshotMode::Full => {
                             builder.insert_by_id(raw.comp_id, ptr);
                         }
-                        crate::prelude::SnapshotMode::PlaceholderEmplaceIfNotExists => {
+                        crate::prelude::SnapshotMode::EmplaceIfNotExists => {
                             builder.insert_if_new_by_id(raw.comp_id, ptr);
                         }
                     }
