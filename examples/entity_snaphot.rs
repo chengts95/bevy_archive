@@ -47,11 +47,12 @@ impl From<&Vector2> for Vector2Wrapper {
         }
     }
 }
-impl Into<Vector2> for Vector2Wrapper {
-    fn into(self) -> Vector2 {
-        Vector2([self.x, self.y])
+impl From<Vector2Wrapper> for Vector2 {
+    fn from(value: Vector2Wrapper) -> Self {
+        Vector2([value.x, value.y])
     }
 }
+
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub struct ChildOfWrapper(pub u32);
 impl From<&ChildOf> for ChildOfWrapper {
@@ -59,9 +60,9 @@ impl From<&ChildOf> for ChildOfWrapper {
         ChildOfWrapper(c.0.index())
     }
 }
-impl Into<ChildOf> for ChildOfWrapper {
-    fn into(self) -> ChildOf {
-        ChildOf(Entity::from_raw_u32(self.0).unwrap())
+impl From<ChildOfWrapper> for ChildOf {
+    fn from(value: ChildOfWrapper) -> Self {
+        ChildOf(Entity::from_raw_u32(value.0).unwrap())
     }
 }
 fn setup_registry() -> SnapshotRegistry {

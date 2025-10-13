@@ -105,20 +105,23 @@ impl SnapshotRegistry {
     {
         let name = short_type_name::<T>();
         self.type_registry.insert(name, TypeId::of::<T>());
-        self.entries.insert(name, SnapshotFactory::new::<T>());
+        self.entries
+            .insert(name, SnapshotFactory::new::<T>(SnapshotMode::Full));
     }
     pub fn register_with_name<T, T1>(&mut self, name: &'static str)
     where
-        T: Component,
-        T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
+        T: Component + From<T1>,
+        T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T>,
     {
         self.type_registry.insert(name, TypeId::of::<T>());
-        self.entries
-            .insert(name, SnapshotFactory::new_with_wrapper_full::<T, T1>());
+        self.entries.insert(
+            name,
+            SnapshotFactory::new_with_wrapper::<T, T1>(SnapshotMode::Full),
+        );
     }
     pub fn register_with_name_mode<T, T1>(&mut self, name: &'static str, mode: SnapshotMode)
     where
-        T: Component,
+        T: Component + From<T1>,
         T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
     {
         self.type_registry.insert(name, TypeId::of::<T>());
@@ -130,17 +133,20 @@ impl SnapshotRegistry {
         T: Component + Serialize + DeserializeOwned,
     {
         self.type_registry.insert(name, TypeId::of::<T>());
-        self.entries.insert(name, SnapshotFactory::new::<T>());
+        self.entries
+            .insert(name, SnapshotFactory::new::<T>(SnapshotMode::Full));
     }
     pub fn register_with<T, T1>(&mut self)
     where
-        T: Component,
+        T: Component + From<T1>,
         T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
     {
         let name = short_type_name::<T>();
         self.type_registry.insert(name, TypeId::of::<T>());
-        self.entries
-            .insert(name, SnapshotFactory::new_with_wrapper_full::<T, T1>());
+        self.entries.insert(
+            name,
+            SnapshotFactory::new_with_wrapper::<T, T1>(SnapshotMode::Full),
+        );
     }
     pub fn register_with_mode<T>(&mut self, mode: SnapshotMode)
     where
@@ -148,14 +154,13 @@ impl SnapshotRegistry {
     {
         let name = short_type_name::<T>();
         self.type_registry.insert(name, TypeId::of::<T>());
-        self.entries
-            .insert(name, SnapshotFactory::with_mode::<T>(mode));
+        self.entries.insert(name, SnapshotFactory::new::<T>(mode));
     }
 
     pub fn get_factory(&self, name: &str) -> Option<&SnapshotFactory> {
         self.entries.get(name)
     }
-   pub fn get_factory_mut(&mut self, name: &str) -> Option<&mut SnapshotFactory> {
+    pub fn get_factory_mut(&mut self, name: &str) -> Option<&mut SnapshotFactory> {
         self.entries.get_mut(name)
     }
     pub fn comp_id_by_name(&self, name: &str, world: &World) -> Option<ComponentId> {

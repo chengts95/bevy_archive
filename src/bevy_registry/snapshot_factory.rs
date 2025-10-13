@@ -22,8 +22,7 @@ pub fn short_type_name<T>() -> &'static str {
 pub enum SnapshotMode {
     #[default]
     Full,
-    Placeholder,
-    PlaceholderEmplaceIfNotExists,
+    EmplaceIfNotExists,
 }
 
 #[derive(Clone, Debug)]
@@ -98,62 +97,24 @@ impl SnapshotFactory {
         world.component_id::<T>()
     }
 
-    pub fn new_with<T>(mode: SnapshotMode) -> Self
-    where
-        T: Serialize + DeserializeOwned + Component + Default + 'static,
-    {
-        Self::with_mode::<T>(mode)
-    }
-    pub fn new<T>() -> Self
+    pub fn new<T>(mode: SnapshotMode) -> Self
     where
         T: Serialize + DeserializeOwned + Component + 'static,
     {
         let (comp_id, register): (CompIdFn, CompRegFn) = build_common!(T);
         let js = JsonValueCodec::new::<T>();
         let arrow = feature_expr!("arrow_rs", Some(ArrowSnapshotFactory::new::<T>()));
-        SnapshotFactory::from_mode_tuple(SnapshotMode::Full, comp_id, register, (js, arrow))
-    }
-    pub fn new_with_wrapper_full<T, T1>() -> Self
-    where
-        T: Component,
-        T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
-    {
-        let (comp_id, register): (CompIdFn, CompRegFn) = build_common!(T);
-
-        let js = JsonValueCodec::new_with_wrapper_full::<T, T1>();
-        let arrow = feature_expr!(
-            "arrow_rs",
-            Some(ArrowSnapshotFactory::new_with_wrapper_full::<T, T1>())
-        );
-        return SnapshotFactory::from_mode_tuple(
-            SnapshotMode::Full,
-            comp_id,
-            register,
-            (js, arrow),
-        );
+        SnapshotFactory::from_mode_tuple(mode, comp_id, register, (js, arrow))
     }
     pub fn new_with_wrapper<T, T1>(mode: SnapshotMode) -> Self
     where
-        T: Component,
-        T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
+        T: Component + From<T1>,
+        T1: Serialize + DeserializeOwned + for<'a> From<&'a T>,
     {
         let (comp_id, register): (CompIdFn, CompRegFn) = build_common!(T);
-        let js = JsonValueCodec::new_with_wrapper::<T, T1>(mode);
-        let arrow = feature_expr!(
-            "arrow_rs",
-            Some(ArrowSnapshotFactory::new_with_wrapper::<T, T1>(mode))
-        );
-        return SnapshotFactory::from_mode_tuple(mode, comp_id, register, (js, arrow));
-    }
 
-    pub fn with_mode<T>(mode: SnapshotMode) -> Self
-    where
-        T: Serialize + DeserializeOwned + Component + Default + 'static,
-    {
-        let (comp_id, register): (CompIdFn, CompRegFn) = build_common!(T);
-        let js = JsonValueCodec::with_mode::<T>(mode);
-
-        let arrow = feature_expr!("arrow_rs", Some(ArrowSnapshotFactory::with_mode::<T>(mode)));
+        let js = JsonValueCodec::new_with::<T, T1>();
+        let arrow = feature_expr!("arrow_rs", Some(ArrowSnapshotFactory::new_with::<T, T1>()));
         return SnapshotFactory::from_mode_tuple(mode, comp_id, register, (js, arrow));
     }
 }
