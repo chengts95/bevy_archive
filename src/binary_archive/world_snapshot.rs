@@ -1,7 +1,7 @@
+use crate::binary_archive::arrow_column::RawTData;
 use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
 mod sparse_entitiy_list;
 mod zip_snapshot;
 
@@ -15,8 +15,7 @@ use crate::{
     archetype_archive::WorldExt,
     arrow_snapshot::{ComponentTable, EntityID},
     prelude::{
-        DeferredEntityBuilder, SnapshotMode, SnapshotRegistry,
-        vec_snapshot_factory::{RawTData, SnapshotError},
+        DeferredEntityBuilder, SnapshotMode, SnapshotRegistry, vec_snapshot_factory::SnapshotError,
     },
 };
 #[derive(Debug, Clone, Default)]

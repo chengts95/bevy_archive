@@ -1,90 +1,10 @@
 use flecs_ecs::prelude::*;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned; 
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
-macro_rules! gen_export {
-    (full, $t:ty) => {
-        |world, entity| {
-            world
-                .entity(entity)
-                .get::<$t>()
-                .and_then(|t| serde_json::to_value(t).ok())
-        }
-    };
-    (placeholder, $t:ty) => {
-        |_, _| Some(serde_json::Value::Null)
-    };
-    (full, $t:ty, $t1:ty) => {
-        |world, entity| {
-            world
-                .entity(entity)
-                .get::<$t>()
-                .and_then(|t| serde_json::to_value(<$t1>::from(t)).ok())
-        }
-    };
-    (placeholder, $t:ty, $t1:ty) => {
-        |_, _| Some(serde_json::Value::Null)
-    };
-}
 
-macro_rules! gen_import {
-    (full,$t:ty) => {
-        |val, world, entity| {
-            let name = short_type_name::<$t>();
-            serde_json::from_value::<$t>(val.clone())
-                .map_err(|e| format!("Deserialization error for {}:{}", name, e))
-                .map(|v| {
-                    world.entity_mut(entity).insert(v);
-                })
-                .map(|_| ())
-        }
-    };
-    (placeholder,$t:ty) => {
-        |_, world, entity| {
-            world.entity_mut(entity).insert(<$t>::default());
-            Ok(())
-        }
-    };
-    (emplace, $t:ty) => {
-        |_, world, entity| {
-            if !world.entity(entity).contains::<$t>() {
-                world.entity_mut(entity).insert(<$t>::default());
-            }
-            Ok(())
-        }
-    };
-    (full, $t:ty, $t1:ty) => {
-        |val, world, entity| {
-            let name = short_type_name::<$t>();
-            serde_json::from_value::<$t1>(val.clone())
-                .map_err(|e| format!("Deserialization error for {}:{}", name, e))
-                .map(|v| {
-                    world.entity_mut(entity).insert::<$t>(v.into());
-                })
-                .map(|_| ())
-        }
-    };
-    (placeholder, $t:ty, $t1:ty) => {
-        |_, world, entity| {
-            world
-                .entity_mut(entity)
-                .insert(Into::<$t>::into(<$t1>::default()));
-            Ok(())
-        }
-    };
-    (emplace, $t:ty, $t1:ty) => {
-        |_, world, entity| {
-            if !world.entity(entity).contains::<$t>() {
-                world
-                    .entity_mut(entity)
-                    .insert(Into::<$t>::into(<$t1>::default()));
-            }
-            Ok(())
-        }
-    };
-}
 fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
         .rsplit("::")
@@ -92,25 +12,6 @@ fn short_type_name<T>() -> &'static str {
         .unwrap_or("unknown")
 }
 
-macro_rules! gen_all {
-    // case: no wrapper
-    (emplace, $t:ty) => {
-        (gen_export!(full, $t), gen_import!(emplace, $t))
-    };
-    // case: no wrapper
-    ($mode:ident, $t:ty) => {
-        (gen_export!($mode, $t), gen_import!($mode, $t))
-    };
-
-    // case: with wrapper
-    (emplace, $t:ty, $t1:ty) => {
-        (gen_export!(full, $t, $t1), gen_import!(emplace, $t, $t1))
-    };
-    // case: with wrapper
-    ($mode:ident, $t:ty, $t1:ty) => {
-        (gen_export!($mode, $t, $t1), gen_import!($mode, $t, $t1))
-    };
-}
 type SnapshotTuple = (ExportFn, ImportFn);
 impl JsonValueCodec {
     #[inline]
@@ -120,48 +21,16 @@ impl JsonValueCodec {
     }
 }
 
-macro_rules! build_snapshot {
-    ($t:ty, $mode:expr,  $parts:expr) => {
-        JsonValueCodec::from_tuple($parts)
-    };
-}
-
-macro_rules! gen_all_full         { ($($t:tt)+) => { gen_all!(full, $($t)+) }; }
-macro_rules! gen_all_placeholder { ($($t:tt)+) => { gen_all!(placeholder, $($t)+) }; }
-macro_rules! gen_all_emplace     { ($($t:tt)+) => { gen_all!(emplace, $($t)+) }; }
-
-macro_rules! gen_and_build {
-    ($t:ty, $mode:expr, $gen_macro:ident) => {{
-        let parts: SnapshotTuple = $gen_macro!($t);
-        build_snapshot!($t, $mode, parts)
-    }};
-    ($t:ty, $t1:ty, $mode:expr, $gen_macro:ident) => {{
-        let parts: SnapshotTuple = $gen_macro!($t, $t1);
-        build_snapshot!($t, $mode, parts)
-    }};
-}
-use crate::prelude::SnapshotMode;
-macro_rules! make_snapshot_factory {
-    (T = $t:ty) => {{ gen_and_build!($t, SnapshotMode::Full, gen_all_full) }};
-    (T = $t:ty, mode = $mode:expr) => {{
-        match $mode {
-            SnapshotMode::Full => gen_and_build!($t, $mode, gen_all_full),
-            SnapshotMode::Placeholder => gen_and_build!($t, $mode, gen_all_placeholder),
-            SnapshotMode::PlaceholderEmplaceIfNotExists => {
-                gen_and_build!($t, $mode, gen_all_emplace)
-            }
-        }
-    }};
-    (T = $t:ty, T1 = $t1:ty) => {{ gen_and_build!($t, $t1, SnapshotMode::Full, gen_all_full) }};
-    (T = $t:ty, T1 = $t1:ty, mode = $mode:expr) => {{
-        match $mode {
-            SnapshotMode::Full => gen_and_build!($t, $t1, $mode, gen_all_full),
-            SnapshotMode::Placeholder => gen_and_build!($t, $t1, $mode, gen_all_placeholder),
-            SnapshotMode::PlaceholderEmplaceIfNotExists => {
-                gen_and_build!($t, $t1, $mode, gen_all_emplace)
-            }
-        }
-    }};
+fn export_full<T>(world: &World, entity: Entity) -> Option<serde_json::Value>
+where
+    T: DataComponent + ComponentId + Serialize + for<'a> Deserialize<'a>,
+{
+    let v = EntityView::new_from(world, entity);
+    let mut ret = None;
+    v.try_get::<Option<&T>>(|t| {
+        ret = t.map(|x| serde_json::to_value(x).unwrap());
+    });
+    ret
 }
 
 #[derive(Clone, Debug)]
@@ -170,37 +39,24 @@ pub struct JsonValueCodec {
     pub import: ImportFn,
 }
 impl JsonValueCodec {
-    pub fn new_with<T>(mode: SnapshotMode) -> Self
-    where
-        T: Serialize + DeserializeOwned + Default + 'static,
-    {
-        Self::with_mode::<T>(mode)
-    }
     pub fn new<T>() -> Self
     where
-        T: Serialize + DeserializeOwned + 'static,
+        T: DataComponent + ComponentId + Serialize + for<'a> Deserialize<'a>,
     {
-        make_snapshot_factory!(T = T)
+        let export = export_full::<T>;
+        Self {
+            export,
+            import: todo!(),
+        }
     }
-    pub fn new_with_wrapper_full<T, T1>() -> Self
+    pub fn new_with<T, T1>() -> Self
     where
-        T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
+        T1: Serialize + for<'a> Deserialize<'a> + for<'a> From<&'a T> + Into<T>,
     {
-        make_snapshot_factory!(T = T, T1 = T1)
-    }
-    pub fn new_with_wrapper<T, T1>(mode: SnapshotMode) -> Self
-    where
-        T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
-    {
-        make_snapshot_factory!(T = T, T1 = T1, mode = mode)
-    }
-
-    pub fn with_mode<T>(mode: SnapshotMode) -> Self
-    where
-        T: Serialize + DeserializeOwned + Default + 'static,
-    {
-        make_snapshot_factory!(T = T, mode = mode)
+       
+        Self {
+            export: todo!(),
+            import: todo!(),
+        }
     }
 }
-
-pub struct BincodeCodec;
