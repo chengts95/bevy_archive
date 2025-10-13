@@ -1,16 +1,11 @@
 use std::{any::TypeId, collections::HashMap};
-
+mod snapshot_factory;
 use flecs_ecs::prelude::*;
+
+pub use snapshot_factory::SnapshotMode;
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &World, Entity) -> Result<(), String>;
-
-pub enum SnapshotMode {
-    /// 完整序列化、反序列化（默认）
-    Full,
-    /// 不输出内容，仅导出结构标记，Load 时调用 Default 构造
-    Placeholder,
-    PlaceholderEmplaceIfNotExists,
-}
+ 
 #[derive(Default, Debug)]
 pub struct SnapshotRegistry {
     pub exporters: HashMap<&'static str, ExportFn>,
