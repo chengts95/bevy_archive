@@ -54,7 +54,7 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let data = serailize_data(fields, v)?;
+        let data = serialize_data(fields, v)?;
         Ok(ArrowColumn {
             fields: fields.to_vec(),
             data,
@@ -198,7 +198,7 @@ impl<T> Default for TagHolder<T> {
     }
 }
 
-fn serailize_data<T>(
+fn serialize_data<T>(
     fields: &[Arc<Field>],
     v: Vec<&T>,
 ) -> Result<Vec<Arc<dyn Array>>, SnapshotError>
