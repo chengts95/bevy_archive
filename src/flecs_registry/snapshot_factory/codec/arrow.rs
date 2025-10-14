@@ -9,7 +9,7 @@ use arrow::{
     array::Array,
     datatypes::{Field, FieldRef},
 };
-use flecs_ecs::{prelude::*, sys::ecs_set_id};
+use flecs_ecs::prelude::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_arrow::{marrow, utils::Item};
 
@@ -59,10 +59,10 @@ where
 
 fn import_full<T>() -> ArrImportFn
 where
-    T: Serialize + DeserializeOwned + ComponentId,
+    T: Serialize + DeserializeOwned + ComponentId + DataComponent,
 {
     let arr_import: ArrImportFn = |arrow, world, entities| {
-        let id = T::id(world.get_world());
+        // let id = T::id(world.get_world());
         let data: Vec<T> = deserialize_data(arrow)?;
         // this should be called in defer section
         entities
@@ -71,16 +71,19 @@ where
             .zip(data.into_iter())
             .into_iter()
             .for_each(|(entity, data)| {
-                let size = std::mem::size_of::<T>();
-                unsafe {
-                    ecs_set_id(
-                        world.world_ptr() as *mut _,
-                        *entity,
-                        id,
-                        size,
-                        (&data as *const T).cast(),
-                    )
-                };
+                // let size = std::mem::size_of::<T>();
+
+                // unsafe {
+                //     ecs_set_id(
+                //         world.world_ptr() as *mut _,
+                //         *entity,
+                //         id,
+                //         size,
+                //         (&data as *const T).cast(),
+                //     )
+                // };
+                let e = EntityView::new_from(world, entity);
+                e.set(data);
             });
 
         Ok(())
@@ -114,11 +117,11 @@ where
 
 fn import_wrapper<T, T1>() -> ArrImportFn
 where
-    T: ComponentId + From<T1>,
+    T: ComponentId + From<T1> + DataComponent,
     T1: Serialize + DeserializeOwned,
 {
     let arr_import: ArrImportFn = |arrow, world, entities| {
-        let id = T::id(world.get_world());
+        //let id = T::id(world.get_world());
         let data: Vec<T1> = deserialize_data(arrow)?;
         // this should be called in defer section
         entities
@@ -128,16 +131,18 @@ where
             .into_iter()
             .for_each(|(entity, data)| {
                 let data = T::from(data);
-                let size = std::mem::size_of::<T>();
-                unsafe {
-                    ecs_set_id(
-                        world.world_ptr() as *mut _,
-                        *entity,
-                        id,
-                        size,
-                        (&data as *const T).cast(),
-                    )
-                };
+                // let size = std::mem::size_of::<T>();
+                // unsafe {
+                //     ecs_set_id(
+                //         world.world_ptr() as *mut _,
+                //         *entity,
+                //         id,
+                //         size,
+                //         (&data as *const T).cast(),
+                //     )
+                // };
+                let e = EntityView::new_from(world, entity);
+                e.set(data);
             });
 
         Ok(())
@@ -153,7 +158,7 @@ pub struct ArrowSnapshotFactory {
 impl ArrowSnapshotFactory {
     pub fn new<T>() -> Self
     where
-        T: Serialize + for<'a> Deserialize<'a> + ComponentId,
+        T: Serialize + for<'a> Deserialize<'a> + ComponentId + DataComponent,
     {
         let schema: Vec<FieldRef> =
             <Vec<FieldRef> as DefaultSchema>::default_schema::<T>().to_vec();
@@ -166,7 +171,7 @@ impl ArrowSnapshotFactory {
 
     pub fn new_with<T, T1>() -> Self
     where
-        T: ComponentId + From<T1>,
+        T: ComponentId + From<T1> + DataComponent,
         T1: Serialize + for<'a> Deserialize<'a> + for<'a> From<&'a T>,
     {
         let schema: Vec<FieldRef> =

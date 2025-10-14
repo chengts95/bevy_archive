@@ -1,6 +1,8 @@
 use flecs_ecs::prelude::*;
- 
+
 use serde::{Deserialize, Serialize};
+
+use crate::flecs_registry::snapshot_factory::codec::ComponentAccess;
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &World, Entity) -> Result<(), String>;
 
@@ -10,18 +12,19 @@ fn short_type_name<T>() -> &'static str {
         .next()
         .unwrap_or("unknown")
 }
- 
 
 fn export_full<T>(world: &World, entity: Entity) -> Option<serde_json::Value>
 where
     T: DataComponent + ComponentId + Serialize + for<'a> Deserialize<'a>,
 {
-    let v = EntityView::new_from(world, entity);
-    let mut ret = None;
-    v.try_get::<Option<&T>>(|t| {
-        ret = t.and_then(|x| serde_json::to_value(x).ok());
-    });
-    ret
+    //  let v = EntityView::new_from(world, entity);
+
+    world
+        .get_data_ref::<T>(entity)
+        .and_then(|x| serde_json::to_value(x).ok())
+    // .try_get::<Option<&T>>(|t| {
+    //     ret = t.and_then(|x| serde_json::to_value(x).ok());
+    // });
 }
 
 fn import_full<T>(value: &serde_json::Value, world: &World, entity: Entity) -> Result<(), String>
@@ -45,15 +48,11 @@ where
 fn export_wrapper<T, T1>(world: &World, entity: Entity) -> Option<serde_json::Value>
 where
     T: ComponentId + DataComponent,
-    T1: Serialize + for<'a> Deserialize<'a> + for<'a> From<&'a T> + Into<T>,
+    T1: Serialize + for<'a> Deserialize<'a> + for<'a> From<&'a T>,
 {
-    let v = EntityView::new_from(world, entity);
-    let mut ret = None;
-  
-    v.try_get::<Option<&T>>(|t| {
-        ret = t.and_then(|x| serde_json::to_value(T1::from(x)).ok());
-    });
-    ret
+    world
+        .get_data_ref::<T>(entity)
+        .and_then(|x| serde_json::to_value(T1::from(x)).ok())
 }
 
 fn import_wrapper<T, T1>(
