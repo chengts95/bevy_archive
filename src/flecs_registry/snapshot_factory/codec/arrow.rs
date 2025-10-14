@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, os::raw::c_void, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     binary_archive::arrow_column::ArrowColumn,
@@ -9,13 +9,7 @@ use arrow::{
     array::Array,
     datatypes::{Field, FieldRef},
 };
-use flecs_ecs::{
-    prelude::*,
-    sys::{
-        self, ecs_bulk_new_w_id, ecs_ensure_id, ecs_get_mut_id, ecs_map_insert, ecs_set_id,
-        ecs_write_begin,
-    },
-};
+use flecs_ecs::{prelude::*, sys::ecs_set_id};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_arrow::{marrow, utils::Item};
 

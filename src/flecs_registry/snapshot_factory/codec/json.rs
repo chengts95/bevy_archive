@@ -10,15 +10,7 @@ fn short_type_name<T>() -> &'static str {
         .next()
         .unwrap_or("unknown")
 }
-
-type SnapshotTuple = (ExportFn, ImportFn);
-impl JsonValueCodec {
-    #[inline]
-    fn from_tuple(parts: SnapshotTuple) -> Self {
-        let (export, import) = parts;
-        JsonValueCodec { export, import }
-    }
-}
+ 
 
 fn export_full<T>(world: &World, entity: Entity) -> Option<serde_json::Value>
 where

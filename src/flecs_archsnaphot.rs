@@ -186,9 +186,9 @@ mod test {
             }
         }
     }
-    impl Into<Vector2> for Vector2Wrapper {
-        fn into(self) -> Vector2 {
-            Vector2([self.x, self.y])
+    impl From<Vector2Wrapper> for Vector2 {
+        fn from(v: Vector2Wrapper) -> Vector2 {
+            Vector2([v.x, v.y])
         }
     }
 
@@ -230,7 +230,7 @@ mod test {
         reg.register::<Velocity>();
         reg.register::<Inventory>();
         reg.register::<NestedComponent>();
-        reg.register::<Vector2>();
+        reg.register_with::<Vector2, Vector2Wrapper>();
         reg.register::<NameID>();
 
         let world = World::new();
