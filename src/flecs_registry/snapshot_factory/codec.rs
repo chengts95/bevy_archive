@@ -1,4 +1,6 @@
 pub mod json;
+
+#[cfg(feature = "arrow_rs")]
 pub mod arrow;
 use std::{ptr::NonNull};
 use flecs_ecs::{prelude::*, sys};

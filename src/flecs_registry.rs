@@ -1,10 +1,10 @@
 use crate::flecs_registry::snapshot_factory::SnapshotFactory;
-use crate::flecs_registry::snapshot_factory::SnapshotMode; 
+use crate::flecs_registry::snapshot_factory::SnapshotMode;
 use flecs_ecs::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::TypeId;
-use std::collections::HashMap; 
+use std::collections::HashMap;
 pub mod snapshot_factory;
 
 pub fn short_type_name<T>() -> &'static str {

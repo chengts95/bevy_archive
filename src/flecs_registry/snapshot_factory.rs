@@ -7,7 +7,7 @@ pub mod codec;
 use codec::json::JsonValueCodec;
 
 #[cfg(feature = "arrow_rs")]
-use crate::flecs_registry::snapshot_factory::codec::arrow::ArrowSnapshotFactory;
+use codec::arrow::ArrowSnapshotFactory;
 
 pub type CompIdFn = fn(&World) -> Option<u64>;
 pub type CompRegFn = fn(&World) -> u64;
