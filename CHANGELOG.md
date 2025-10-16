@@ -1,19 +1,21 @@
 # Changelog
-## [0.2.0] - 2024-10-10
+## [0.2.0] - 2025-10-16
+- Fix memory leak if the struct is not Plain-Old-Data.
 - Initial support for Arrow, parquet and binary format.
 - Remove placeholder snapshot mode and remove snapshot mode from factories.
-## [0.1.4] - 2024-05-14
+  
+## [0.1.4] - 2025-05-14
 - Initial support for singleton/resource.
 - Initial support for merging snapshot.
 - Initial support for binary (msgpack) data format.
 - Initial support for export options.
   
-## [0.1.3] - 2024-05-14
+## [0.1.3] - 2025-05-14
 
 ### Fix
 - Fix `DeferredEntityBuilder::insert_if_new_by_id` to properly insert the components.
 
-## [0.1.2] - 2024-05-14
+## [0.1.2] - 2025-05-14
 
 ### Added
 - `DeferredEntityBuilder` and `load_world_arch_snapshot_defragment` now support `insert_if_new`.
@@ -22,7 +24,7 @@
 -   Refactored `bevy_registry` to support more operations.
 
 
-## [0.1.1] - 2024-05-14
+## [0.1.1] - 2025-05-14
 
 ### Added
 - Integration with bump allocator for temporary component memory.
