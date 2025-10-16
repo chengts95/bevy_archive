@@ -115,14 +115,14 @@ pub fn load_world_arch_snapshot(
     world.component::<NameID>();
     let max_entities = snapshot.entities.last().unwrap() + 1;
     world.preallocate_entity_count(max_entities as i32);
-    world.defer_begin();
+
     for artype in &snapshot.archetypes {
         let functions = artype
             .component_types
             .iter()
             .map(|x| reg.get_factory(x.as_str()).unwrap().js_value.import);
         let entities = artype.entities();
-
+    
         artype.columns.iter().zip(functions).for_each(|(col, f)| {
             for (row, &ent) in entities.iter().enumerate() {
                 let entity = world.entity_from_id(ent as u64);
@@ -131,8 +131,10 @@ pub fn load_world_arch_snapshot(
                 f(&col[row], &world, entity.id()).unwrap();
             }
         });
+      
     }
-
+  
+    world.defer_begin();
     world.new_query::<&NameID>().each_entity(|e, name| {
         e.set_name(name.0.as_str());
     });
