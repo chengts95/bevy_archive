@@ -1,15 +1,16 @@
-use bevy_ecs::{component::ComponentId, prelude::*};
-
+use flecs_ecs::prelude::ComponentId;
+use flecs_ecs::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::prelude::codec::JsonValueCodec;
-#[cfg(feature = "arrow_rs")]
-use crate::prelude::vec_snapshot_factory::ArrowSnapshotFactory;
 pub mod codec;
+use codec::json::JsonValueCodec;
 
-pub type CompIdFn = fn(&World) -> Option<ComponentId>;
-pub type CompRegFn = fn(&mut World) -> ComponentId;
+#[cfg(feature = "arrow_rs")]
+use crate::flecs_registry::snapshot_factory::codec::arrow::ArrowSnapshotFactory;
+
+pub type CompIdFn = fn(&World) -> Option<u64>;
+pub type CompRegFn = fn(&World) -> u64;
 
 pub fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
@@ -22,7 +23,8 @@ pub fn short_type_name<T>() -> &'static str {
 pub enum SnapshotMode {
     #[default]
     Full,
-    EmplaceIfNotExists,
+    Placeholder,
+    PlaceholderEmplaceIfNotExists,
 }
 
 #[derive(Clone, Debug)]
@@ -85,21 +87,18 @@ impl SnapshotFactory {
 
 macro_rules! build_common {
     ($t:ty ) => {
-        (SnapshotFactory::component_id::<$t>, |world| {
-            world.register_component::<$t>()
-        })
+        (SnapshotFactory::component_id::<$t>, |world| <$t>::id(world))
     };
 }
 
 impl SnapshotFactory {
     #[inline]
-    fn component_id<T: Component>(world: &World) -> Option<ComponentId> {
-        world.component_id::<T>()
+    fn component_id<T: ComponentId>(world: &World) -> Option<u64> {
+        Some(T::id(world))
     }
-
     pub fn new<T>(mode: SnapshotMode) -> Self
     where
-        T: Serialize + DeserializeOwned + Component + 'static,
+        T: Serialize + DeserializeOwned + ComponentId + DataComponent + 'static,
     {
         let (comp_id, register): (CompIdFn, CompRegFn) = build_common!(T);
         let js = JsonValueCodec::new::<T>();
@@ -108,7 +107,7 @@ impl SnapshotFactory {
     }
     pub fn new_with_wrapper<T, T1>(mode: SnapshotMode) -> Self
     where
-        T: Component + From<T1>,
+        T: ComponentId + From<T1> + DataComponent,
         T1: Serialize + DeserializeOwned + for<'a> From<&'a T>,
     {
         let (comp_id, register): (CompIdFn, CompRegFn) = build_common!(T);

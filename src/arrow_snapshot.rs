@@ -3,7 +3,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use crate::archetype_archive::ArchetypeSnapshot;
-use crate::prelude::vec_snapshot_factory::ArrowColumn;
+use crate::binary_archive::arrow_column::ArrowColumn;
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use parquet::arrow::ArrowWriter;

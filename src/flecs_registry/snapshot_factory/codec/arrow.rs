@@ -1,9 +1,18 @@
-use std::{marker::PhantomData, ptr::NonNull};
+use std::{marker::PhantomData, sync::Arc};
 
-use crate::prelude::{ArenaBox, vec_snapshot_factory::*};
-use arrow::{array::Array, datatypes::FieldRef};
-use serde::de::DeserializeOwned;
-use serde_arrow::marrow;
+use crate::{
+    binary_archive::arrow_column::ArrowColumn,
+    flecs_registry::snapshot_factory::codec::ComponentAccess,
+    prelude::vec_snapshot_factory::DefaultSchema,
+};
+use arrow::{
+    array::Array,
+    datatypes::{Field, FieldRef},
+};
+use flecs_ecs::prelude::*;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_arrow::{marrow, utils::Item};
+
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
     #[error("missing factory for component/resource: {0}")]
@@ -25,35 +34,20 @@ pub enum SnapshotError {
 }
 
 pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn, SnapshotError>;
-pub type ArrImportFn = fn(&ArrowColumn, &mut World, &[Entity]) -> Result<(), SnapshotError>;
-pub type ArrDynFn = for<'a> fn(
-    &ArrowColumn,
-    &'a bumpalo::Bump,
-    &World,
-) -> Result<Vec<ArenaBox<'a>>, SnapshotError>;
-
-impl DefaultSchema for Vec<FieldRef> {}
-#[derive(Clone, Debug)]
-pub struct ArrowSnapshotFactory {
-    pub arr_export: ArrExportFn,
-    pub arr_import: ArrImportFn,
-    pub arr_dyn: ArrDynFn,
-    pub schema: Vec<FieldRef>,
-}
+pub type ArrImportFn = fn(&ArrowColumn, &World, &[Entity]) -> Result<(), SnapshotError>;
 fn export_full<T>() -> ArrExportFn
 where
-    T: Serialize + for<'a> Deserialize<'a> + Component,
+    T: Serialize + DeserializeOwned + ComponentId,
 {
     let arr_export: ArrExportFn = |fields, world, entities| {
         let v: Vec<_> = entities
             .iter()
             .map(|x| {
-                world.get::<T>(*x).ok_or_else(|| {
+                world.get_data_ref::<T>(*x).ok_or_else(|| {
                     SnapshotError::MissingComponent(std::any::type_name::<T>().to_string())
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-
         let data = serialize_data(fields, v)?;
         Ok(ArrowColumn {
             fields: fields.to_vec(),
@@ -62,111 +56,122 @@ where
     };
     arr_export
 }
+
 fn import_full<T>() -> ArrImportFn
 where
-    T: Serialize + DeserializeOwned + Component,
+    T: Serialize + DeserializeOwned + ComponentId + DataComponent,
 {
     let arr_import: ArrImportFn = |arrow, world, entities| {
+        // let id = T::id(world.get_world());
         let data: Vec<T> = deserialize_data(arrow)?;
-        let temp_data: Vec<(Entity, T)> =
-            entities.iter().map(|x| *x).zip(data.into_iter()).collect();
-        world.insert_batch(temp_data);
-        Ok(())
-    };
-    arr_import
-}
-fn dyn_ctor_full<T>() -> ArrDynFn
-where
-    T: Serialize + DeserializeOwned + Component,
-{
-    let arr_dyn_ctor: ArrDynFn = |arrow, bump, _world| {
-        let data = deserialize_data(arrow)?;
-        let data = data
+        // this should be called in defer section
+        entities
+            .iter()
+            .map(|x| *x)
+            .zip(data.into_iter())
             .into_iter()
-            .map(|component| {
-                let ptr = bump.alloc(component) as *mut T;
-                unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
-            })
-            .collect();
-        Ok(data)
-    };
-    arr_dyn_ctor
-}
-fn import_wrapper<T, T1>() -> ArrImportFn
-where
-    T: Component + From<T1>,
-    T1: Serialize + DeserializeOwned + for<'a> From<&'a T>,
-{
-    let arr_import: ArrImportFn = |arrow, world, entities| {
-        let data: Vec<T1> = deserialize_data(arrow)?;
-        let data = data.into_iter().map(|x| T::from(x));
-        let temp_data: Vec<(Entity, T)> =
-            entities.iter().map(|x| *x).zip(data.into_iter()).collect();
-        world.insert_batch(temp_data);
+            .for_each(|(entity, data)| {
+                // let size = std::mem::size_of::<T>();
+
+                // unsafe {
+                //     ecs_set_id(
+                //         world.world_ptr() as *mut _,
+                //         *entity,
+                //         id,
+                //         size,
+                //         (&data as *const T).cast(),
+                //     )
+                // };
+                let e = EntityView::new_from(world, entity);
+                e.set(data);
+            });
+
         Ok(())
     };
-
     arr_import
 }
 
 fn export_wrapper<T, T1>() -> ArrExportFn
 where
-    T: Component + From<T>,
-    T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
+    T: ComponentId,
+    T1: Serialize + DeserializeOwned + for<'a> From<&'a T>,
 {
     let arr_export: ArrExportFn = |fields, world, entities| {
-        let v: Vec<T1> = entities
+        let v: Vec<_> = entities
             .iter()
-            .map(|x| T1::from(world.get::<T>(*x).unwrap()))
-            .collect();
+            .map(|x| {
+                world.get_data_ref::<T>(*x).ok_or_else(|| {
+                    SnapshotError::MissingComponent(std::any::type_name::<T>().to_string())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let v: Vec<T1> = v.into_iter().map(|x| T1::from(x)).collect();
         let data = serailize_data_owned(fields, v)?;
         Ok(ArrowColumn {
             fields: fields.to_vec(),
-            data: data,
+            data,
         })
     };
-
     arr_export
 }
 
-fn dyn_wrapper<T, T1>() -> ArrDynFn
+fn import_wrapper<T, T1>() -> ArrImportFn
 where
-    T: Component + From<T1>,
-    T1: Serialize + DeserializeOwned + for<'a> From<&'a T>,
+    T: ComponentId + From<T1> + DataComponent,
+    T1: Serialize + DeserializeOwned,
 {
-    let arr_dyn_ctor: ArrDynFn = |arrow, bump, _world| {
+    let arr_import: ArrImportFn = |arrow, world, entities| {
+        //let id = T::id(world.get_world());
         let data: Vec<T1> = deserialize_data(arrow)?;
-        let data = data
+        // this should be called in defer section
+        entities
+            .iter()
+            .map(|x| *x)
+            .zip(data.into_iter())
             .into_iter()
-            .map(|component| {
-                let ptr = bump.alloc(T::from(component)) as *mut T;
-                ArenaBox::new::<T>(unsafe {
-                        OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
-                    })
-            })
-            .collect();
-        Ok(data)
+            .for_each(|(entity, data)| {
+                let data = T::from(data);
+                // let size = std::mem::size_of::<T>();
+                // unsafe {
+                //     ecs_set_id(
+                //         world.world_ptr() as *mut _,
+                //         *entity,
+                //         id,
+                //         size,
+                //         (&data as *const T).cast(),
+                //     )
+                // };
+                let e = EntityView::new_from(world, entity);
+                e.set(data);
+            });
+
+        Ok(())
     };
-    arr_dyn_ctor
+    arr_import
+}
+#[derive(Clone, Debug)]
+pub struct ArrowSnapshotFactory {
+    pub arr_export: ArrExportFn,
+    pub arr_import: ArrImportFn,
+    pub schema: Vec<FieldRef>,
 }
 impl ArrowSnapshotFactory {
     pub fn new<T>() -> Self
     where
-        T: Serialize + for<'a> Deserialize<'a> + Component,
+        T: Serialize + for<'a> Deserialize<'a> + ComponentId + DataComponent,
     {
         let schema: Vec<FieldRef> =
             <Vec<FieldRef> as DefaultSchema>::default_schema::<T>().to_vec();
         Self {
             arr_export: export_full::<T>(),
             arr_import: import_full::<T>(),
-            arr_dyn: dyn_ctor_full::<T>(),
             schema,
         }
     }
 
     pub fn new_with<T, T1>() -> Self
     where
-        T: Component + From<T1>,
+        T: ComponentId + From<T1> + DataComponent,
         T1: Serialize + for<'a> Deserialize<'a> + for<'a> From<&'a T>,
     {
         let schema: Vec<FieldRef> =
@@ -174,7 +179,6 @@ impl ArrowSnapshotFactory {
         Self {
             arr_export: export_wrapper::<T, T1>(),
             arr_import: import_wrapper::<T, T1>(),
-            arr_dyn: dyn_wrapper::<T, T1>(),
             schema,
         }
     }
@@ -190,7 +194,7 @@ impl<T> From<&T> for TagHolder<T> {
         TagHolder::default()
     }
 }
- 
+
 impl<T> Default for TagHolder<T> {
     fn default() -> Self {
         Self {
@@ -198,21 +202,6 @@ impl<T> Default for TagHolder<T> {
             _p: PhantomData::default(),
         }
     }
-}
-
-fn serialize_data<T>(
-    fields: &[Arc<Field>],
-    v: Vec<&T>,
-) -> Result<Vec<Arc<dyn Array>>, SnapshotError>
-where
-    T: Serialize + DeserializeOwned,
-{
-    serde_arrow::to_arrow(fields, &v)
-        .or_else(|_| {
-            let items: Vec<_> = v.iter().map(|x| serde_arrow::utils::Item(x)).collect();
-            serde_arrow::to_arrow(fields, &items)
-        })
-        .map_err(|x| SnapshotError::GenericBox(x.into()))
 }
 
 fn serailize_data_owned<T>(
@@ -233,6 +222,20 @@ where
         )?,
     };
     Ok(data)
+}
+fn serialize_data<T>(
+    fields: &[Arc<Field>],
+    v: Vec<&T>,
+) -> Result<Vec<Arc<dyn Array>>, SnapshotError>
+where
+    T: Serialize + DeserializeOwned,
+{
+    serde_arrow::to_arrow(fields, &v)
+        .or_else(|_| {
+            let items: Vec<_> = v.iter().map(|x| serde_arrow::utils::Item(x)).collect();
+            serde_arrow::to_arrow(fields, &items)
+        })
+        .map_err(|x| SnapshotError::GenericBox(x.into()))
 }
 
 fn deserialize_data<T>(arrow: &ArrowColumn) -> Result<Vec<T>, SnapshotError>

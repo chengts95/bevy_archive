@@ -91,7 +91,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                 .iter()
                 .for_each(|ty| snap.add_type(ty, None));
             for ty in &to_be_serialize {
-                let f = reg.exporters.get(ty.as_str()).unwrap();
+                let f = reg.get_factory(ty.as_str()).unwrap().js_value.export;
                 let col = snap.get_column_mut(ty).unwrap();
                 for (idx, eid) in entities.iter().enumerate() {
                     col[idx] = f(world, Entity::new(*eid as u64)).unwrap();
@@ -120,7 +120,7 @@ pub fn load_world_arch_snapshot(
         let functions = artype
             .component_types
             .iter()
-            .map(|x| reg.importers[x.as_str()]);
+            .map(|x| reg.get_factory(x.as_str()).unwrap().js_value.import);
         let entities = artype.entities();
         world.defer_begin();
         artype.columns.iter().zip(functions).for_each(|(col, f)| {
@@ -186,9 +186,9 @@ mod test {
             }
         }
     }
-    impl Into<Vector2> for Vector2Wrapper {
-        fn into(self) -> Vector2 {
-            Vector2([self.x, self.y])
+    impl From<Vector2Wrapper> for Vector2 {
+        fn from(v: Vector2Wrapper) -> Vector2 {
+            Vector2([v.x, v.y])
         }
     }
 
@@ -230,7 +230,7 @@ mod test {
         reg.register::<Velocity>();
         reg.register::<Inventory>();
         reg.register::<NestedComponent>();
-        reg.register::<Vector2>();
+        reg.register_with::<Vector2, Vector2Wrapper>();
         reg.register::<NameID>();
 
         let world = World::new();

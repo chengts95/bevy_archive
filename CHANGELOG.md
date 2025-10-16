@@ -1,7 +1,7 @@
 # Changelog
-## [0.3.0] - 2024-10-04
+## [0.2.0] - 2024-10-10
 - Initial support for Arrow, parquet and binary format.
-
+- Remove placeholder snapshot mode and remove snapshot mode from factories.
 ## [0.1.4] - 2024-05-14
 - Initial support for singleton/resource.
 - Initial support for merging snapshot.

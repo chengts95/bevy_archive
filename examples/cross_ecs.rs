@@ -52,9 +52,9 @@ impl From<&Vector2> for Vector2Wrapper {
         }
     }
 }
-impl Into<Vector2> for Vector2Wrapper {
-    fn into(self) -> Vector2 {
-        Vector2([self.x, self.y])
+impl From<Vector2Wrapper> for Vector2 {
+    fn from(p: Vector2Wrapper) -> Self {
+        Self([p.x, p.y])
     }
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -90,9 +90,9 @@ impl From<&Name> for NameID {
         Self(value.to_string())
     }
 }
-impl Into<Name> for NameID {
-    fn into(self) -> Name {
-        Name::new(self.0)
+impl From<NameID> for Name {
+    fn from(value: NameID) -> Self {
+        Self::new(value.0)
     }
 }
 fn setup_registry_bevy() -> bevy_archive::prelude::SnapshotRegistry {

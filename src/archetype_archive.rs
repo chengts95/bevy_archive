@@ -163,7 +163,8 @@ pub fn load_world_resource(
         let factory = reg.get_res_factory(res);
         match factory {
             Some(factory) => {
-                (factory.js_value.import)(&data[res], world, Entity::from_raw_u32(0).unwrap()).unwrap();
+                (factory.js_value.import)(&data[res], world, Entity::from_raw_u32(0).unwrap())
+                    .unwrap();
             }
             None => {
                 //may need to emit warnings here
@@ -178,8 +179,10 @@ pub fn save_world_resource(
     let mut map = HashMap::new();
     let saveable_resource = reg.resource_entries.keys();
     for res in saveable_resource {
-        let value =
-            (reg.get_res_factory(res).unwrap().js_value.export)(world, Entity::from_raw_u32(0).unwrap());
+        let value = (reg.get_res_factory(res).unwrap().js_value.export)(
+            world,
+            Entity::from_raw_u32(0).unwrap(),
+        );
         if let Some(value) = value {
             map.insert(res.to_string(), value);
         }
@@ -320,11 +323,11 @@ pub fn load_world_arch_snapshot_defragment(
                 let col = &arch.columns[col_idx];
                 let (id, comp_ptr) = (comp_id, ctor(&col[row], &bump).unwrap());
                 match mode {
-                    SnapshotMode::Full | SnapshotMode::Placeholder => {
+                    SnapshotMode::Full => {
                         builder.insert_by_id(id, comp_ptr);
                     }
 
-                    SnapshotMode::PlaceholderEmplaceIfNotExists => {
+                    SnapshotMode::EmplaceIfNotExists => {
                         builder.insert_if_new_by_id(id, comp_ptr);
                     }
                 }
