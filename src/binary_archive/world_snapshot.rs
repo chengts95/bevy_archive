@@ -2,9 +2,10 @@ use crate::binary_archive::arrow_column::RawTData;
 use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(feature = "flecs")]
+pub mod flecs;
 mod sparse_entitiy_list;
 mod zip_snapshot;
-
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
 pub enum BinFormat {
     #[default]
