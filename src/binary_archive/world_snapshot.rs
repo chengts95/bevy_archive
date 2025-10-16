@@ -215,9 +215,7 @@ impl WorldArrowSnapshot {
 use bevy_ecs::archetype::Archetype;
 
 #[derive(Serialize, Clone, Debug, Default, Deserialize)]
-pub struct BinBlob(
-    #[serde(with = "serde_bytes")]
-    pub Vec<u8>);
+pub struct BinBlob(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorldBinArchSnapshot {
@@ -232,8 +230,6 @@ impl WorldBinArchSnapshot {
     pub fn to_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
         rmp_serde::to_vec(self)
     }
-
-    
 }
 impl From<WorldArrowSnapshot> for WorldBinArchSnapshot {
     fn from(value: WorldArrowSnapshot) -> Self {

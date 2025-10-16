@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 pub type ExportFn = fn(&World, Entity) -> Option<serde_json::Value>;
 pub type ImportFn = fn(&serde_json::Value, &mut World, Entity) -> Result<(), String>;
 pub type DynBuilderFn =
-    for<'a> fn(&serde_json::Value, &'a bumpalo::Bump) -> Result<OwningPtr<'a>, String>;
+    for<'a> fn(&serde_json::Value, &'a bumpalo::Bump) -> Result<ArenaBox<'a>, String>;
 macro_rules! gen_export {
     (full, $t:ty) => {
         |world, entity| {
@@ -103,13 +103,17 @@ macro_rules! gen_ctor {
             let component: $t = serde_json::from_value(val.clone())
                 .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
             let ptr = bump.alloc(component) as *mut $t;
-            Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+            Ok(ArenaBox::new::<T>(unsafe {
+                OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+            }))
         }
     };
     (placeholder,$t:ty) => {
         |_val, bump| {
             let ptr = bump.alloc(<$t>::default()) as *mut $t;
-            Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+            Ok(ArenaBox::new::<T>(unsafe {
+                OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+            }))
         }
     };
     (full, $t:ty, $t1:ty) => {
@@ -118,13 +122,17 @@ macro_rules! gen_ctor {
             let component: $t1 = serde_json::from_value(val.clone())
                 .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
             let ptr = bump.alloc(Into::<$t>::into(component)) as *mut $t;
-            Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+            Ok(ArenaBox::new::<T>(unsafe {
+                OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+            }))
         }
     };
     (placeholder, $t:ty, $t1:ty) => {
         |_, bump| {
             let ptr = bump.alloc(Into::<$t>::into(<$t1>::default())) as *mut $t;
-            Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+            Ok(ArenaBox::new::<T>(unsafe {
+                OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+            }))
         }
     };
 }
@@ -196,7 +204,7 @@ macro_rules! gen_and_build {
         build_snapshot!($t, $mode, parts)
     }};
 }
-use crate::prelude::SnapshotMode;
+use crate::prelude::{SnapshotMode, ArenaBox};
 macro_rules! make_snapshot_factory {
     (T = $t:ty) => {{ gen_and_build!($t, SnapshotMode::Full, gen_all_full) }};
     (T = $t:ty, mode = $mode:expr) => {{

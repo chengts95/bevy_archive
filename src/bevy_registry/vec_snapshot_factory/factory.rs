@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 
-use crate::prelude::{SnapshotMode, vec_snapshot_factory::*};
+use crate::prelude::{SnapshotMode, ArenaBox, vec_snapshot_factory::*};
 use arrow::{array::Array, datatypes::FieldRef};
 use serde::de::DeserializeOwned;
 use serde_arrow::marrow;
@@ -30,7 +30,7 @@ pub type ArrDynFn = for<'a> fn(
     &ArrowColumn,
     &'a bumpalo::Bump,
     &World,
-) -> Result<Vec<OwningPtr<'a>>, SnapshotError>;
+) -> Result<Vec<ArenaBox<'a>>, SnapshotError>;
 
 impl DefaultSchema for Vec<FieldRef> {}
 #[derive(Clone, Debug)]
@@ -349,7 +349,9 @@ where
             .into_iter()
             .map(|component| {
                 let ptr = bump.alloc(component) as *mut T;
-                unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
+                ArenaBox::new::<T>(unsafe {
+                    OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+                })
             })
             .collect();
         Ok(data)
@@ -386,7 +388,9 @@ where
                 .into_iter()
                 .map(|_| {
                     let ptr = bump.alloc(T::default()) as *mut T;
-                    unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
+                    ArenaBox::new::<T>(unsafe {
+                        OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+                    })
                 })
                 .collect();
             Ok(data)
@@ -405,7 +409,9 @@ where
             .into_iter()
             .map(|component| {
                 let ptr = bump.alloc(Into::<T>::into(component)) as *mut T;
-                unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
+                ArenaBox::new::<T>(unsafe {
+                    OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+                })
             })
             .collect();
         Ok(data)
@@ -426,7 +432,9 @@ where
                 .into_iter()
                 .map(|_| {
                     let ptr = bump.alloc(Into::<T>::into(T1::default())) as *mut T;
-                    unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
+                    ArenaBox::new::<T>(unsafe {
+                        OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+                    })
                 })
                 .collect();
             Ok(data)
