@@ -13,16 +13,40 @@ pub use snapshot_factory::*;
 
 use crate::prelude::codec::JsonValueCodec;
 
-pub struct DeferredEntityBuilder<'a> {
-    world: &'a mut World,
+//this is a workaround
+//it allows to have a type erased box that can drop the inner type correctly
+//it must be dropped manually or it will leak memory.
+pub struct ArenaBox<'a> {
+    ptr: OwningPtr<'a, Aligned>,
+    drop_fn: unsafe fn(OwningPtr<'a, Aligned>),
+}
+impl<'a> ArenaBox<'a> {
+    pub fn new<T>(ptr: OwningPtr<'a, Aligned>) -> Self {
+        Self {
+            ptr,
+            drop_fn: |ptr| unsafe {
+                ptr.drop_as::<T>();
+            },
+        }
+    }
+    pub fn manual_drop(self) {
+        unsafe { (self.drop_fn)(self.ptr) }
+    }
+    pub fn as_ptr(&self) -> *const u8 {
+        self.ptr.as_ptr()
+    }
+}
+
+pub struct DeferredEntityBuilder<'w, 'a> {
+    world: &'w mut World,
     entity: Entity,
     ids: Vec<ComponentId>,
-    ptrs: Vec<OwningPtr<'a, Aligned>>,
+    ptrs: Vec<ArenaBox<'a>>,
     bump: &'a Bump,
 }
 
-impl<'a> DeferredEntityBuilder<'a> {
-    pub fn new(world: &'a mut World, bump: &'a Bump, entity: Entity) -> Self {
+impl<'w, 'a> DeferredEntityBuilder<'w, 'a> {
+    pub fn new(world: &'w mut World, bump: &'a Bump, entity: Entity) -> Self {
         Self {
             world,
             entity,
@@ -38,15 +62,16 @@ impl<'a> DeferredEntityBuilder<'a> {
             .unwrap_or_else(|| self.world.register_component::<T>());
         let ptr = self.bump.alloc(value) as *mut T;
         let ptr = unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) };
-        self.insert_by_id(id, ptr);
+        self.insert_by_id(id, ArenaBox::new::<T>(ptr));
     }
-    pub fn insert_if_new_by_id(&mut self, id: ComponentId, ptr: OwningPtr<'a>) {
+    pub fn insert_if_new_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'a>) {
         if self.world.entity(self.entity).contains_id(id) {
+            ptr.manual_drop();
             return;
         }
         self.insert_by_id(id, ptr);
     }
-    pub fn insert_by_id(&mut self, id: ComponentId, ptr: OwningPtr<'a>) {
+    pub fn insert_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'a>) {
         if let Some(i) = self.ids.iter().position(|&existing| existing == id) {
             self.ptrs[i] = ptr; // replace old value
         } else {
@@ -54,12 +79,17 @@ impl<'a> DeferredEntityBuilder<'a> {
             self.ptrs.push(ptr);
         }
     }
-
-    pub fn commit(mut self) {
+    pub fn manual_drop(self) {
+        for ptr in self.ptrs {
+            ptr.manual_drop();
+        }
+    }
+    pub fn commit(self) {
         let mut entity = self.world.entity_mut(self.entity);
-        unsafe { entity.insert_by_ids(&self.ids, self.ptrs.drain(..)) };
+        unsafe { entity.insert_by_ids(&self.ids, self.ptrs.into_iter().map(|x| x.ptr)) };
     }
 }
+
 pub trait SnapshotMerge {
     fn merge_only_new(&mut self, other: &Self);
     fn merge(&mut self, other: &Self);
@@ -155,7 +185,7 @@ impl SnapshotRegistry {
     pub fn get_factory(&self, name: &str) -> Option<&SnapshotFactory> {
         self.entries.get(name)
     }
-   pub fn get_factory_mut(&mut self, name: &str) -> Option<&mut SnapshotFactory> {
+    pub fn get_factory_mut(&mut self, name: &str) -> Option<&mut SnapshotFactory> {
         self.entries.get_mut(name)
     }
     pub fn comp_id_by_name(&self, name: &str, world: &World) -> Option<ComponentId> {
@@ -202,7 +232,9 @@ impl SnapshotRegistry {
                     let component: T = serde_json::from_value(val.clone())
                         .map_err(|e| format!("Deserialization error for {}:{}", name, e))?;
                     let ptr = bump.alloc(component) as *mut T;
-                    Ok(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
+                    Ok(ArenaBox::new::<T>(unsafe {
+                        OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
+                    }))
                 },
             },
 

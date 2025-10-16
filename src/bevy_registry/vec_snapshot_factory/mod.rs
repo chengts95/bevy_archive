@@ -15,7 +15,7 @@ use serde_arrow::utils::Item;
 use serde_json::Value;
 
 mod factory;
-use crate::prelude::SnapshotMode;
+use crate::prelude::{SnapshotMode, ArenaBox};
 pub use factory::ArrowSnapshotFactory;
 pub use factory::SnapshotError;
 
@@ -30,7 +30,7 @@ pub struct ArrowColumn {
 
 pub struct RawTData<'a> {
     pub comp_id: ComponentId,
-    pub data: Vec<OwningPtr<'a>>,
+    pub data: Vec<ArenaBox<'a>>,
 }
 
 pub fn short_type_name<T>() -> &'static str {
