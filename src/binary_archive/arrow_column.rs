@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, RecordBatch};
-
-use bevy_ecs::ptr::OwningPtr;
+ 
 use bevy_ecs::{component::ComponentId, prelude::*};
 
 use arrow::datatypes::FieldRef;
@@ -12,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_arrow::schema::SchemaLike;
 use serde_arrow::schema::TracingOptions; 
 use serde_json::Value;
+
+use crate::prelude::ArenaBox;
 
 
 
@@ -23,7 +24,7 @@ pub struct ArrowColumn {
 
 pub struct RawTData<'a> {
     pub comp_id: ComponentId,
-    pub data: Vec<OwningPtr<'a>>,
+    pub data: Vec<ArenaBox<'a>>,
 }
 
 pub fn short_type_name<T>() -> &'static str {

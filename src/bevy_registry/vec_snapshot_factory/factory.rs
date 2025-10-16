@@ -26,11 +26,8 @@ pub enum SnapshotError {
 
 pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn, SnapshotError>;
 pub type ArrImportFn = fn(&ArrowColumn, &mut World, &[Entity]) -> Result<(), SnapshotError>;
-pub type ArrDynFn = for<'a> fn(
-    &ArrowColumn,
-    &'a bumpalo::Bump,
-    &World,
-) -> Result<Vec<ArenaBox<'a>>, SnapshotError>;
+pub type ArrDynFn =
+    for<'a> fn(&ArrowColumn, &'a bumpalo::Bump, &World) -> Result<Vec<ArenaBox<'a>>, SnapshotError>;
 
 impl DefaultSchema for Vec<FieldRef> {}
 #[derive(Clone, Debug)]
@@ -85,7 +82,7 @@ where
             .into_iter()
             .map(|component| {
                 let ptr = bump.alloc(component) as *mut T;
-                unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) }
+                unsafe { ArenaBox::new::<T>(OwningPtr::new(NonNull::new_unchecked(ptr.cast()))) }
             })
             .collect();
         Ok(data)
@@ -140,9 +137,7 @@ where
             .into_iter()
             .map(|component| {
                 let ptr = bump.alloc(T::from(component)) as *mut T;
-                ArenaBox::new::<T>(unsafe {
-                        OwningPtr::new(NonNull::new_unchecked(ptr.cast()))
-                    })
+                ArenaBox::new::<T>(unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) })
             })
             .collect();
         Ok(data)
@@ -190,7 +185,7 @@ impl<T> From<&T> for TagHolder<T> {
         TagHolder::default()
     }
 }
- 
+
 impl<T> Default for TagHolder<T> {
     fn default() -> Self {
         Self {
