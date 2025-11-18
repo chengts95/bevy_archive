@@ -87,14 +87,14 @@ impl SnapshotFactory {
 
 macro_rules! build_common {
     ($t:ty ) => {
-        (SnapshotFactory::component_id::<$t>, |world| <$t>::id(world))
+        (SnapshotFactory::component_id::<$t>, |world| <$t>::get_id(world))
     };
 }
 
 impl SnapshotFactory {
     #[inline]
     fn component_id<T: ComponentId>(world: &World) -> Option<u64> {
-        Some(T::id(world))
+        Some(T::get_id(world))
     }
     pub fn new<T>(mode: SnapshotMode) -> Self
     where

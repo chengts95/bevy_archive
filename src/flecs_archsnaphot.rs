@@ -1,3 +1,4 @@
+/// This flecs archsnapshot module cannot work due to cannot query all tables easily.
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{archetype_archive::*, flecs_registry::SnapshotRegistry};
@@ -5,6 +6,7 @@ use crate::{archetype_archive::*, flecs_registry::SnapshotRegistry};
 use bimap::BiMap;
 use flecs_ecs::core::flecs::{Identifier, Name};
 use flecs_ecs::prelude::World;
+use flecs_ecs::sys::{ecs_query_desc_t, ecs_term_t};
 use flecs_ecs::{
     core::{Entity, flecs::Component as EcsComponent},
     prelude::*,
@@ -13,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Component, Default)]
 #[allow(dead_code)]
-struct SerializeTarget(u32);
+struct SerializeTarget(pub u32);
 #[derive(Component, Serialize, Deserialize, Default)]
 pub struct NameID(pub String);
 fn all_entities(world: &World) -> &[u64] {
@@ -35,7 +37,7 @@ fn derive_type_mapping_cache(
     q.each_entity(|e, _| {
         e.get_name().inspect(|x| {
             exclude_meta.insert(e.id());
-            if reg.type_registry.contains_key(x) {
+            if reg.type_registry.contains_key(x.as_str()) {
                 map.insert(x.to_string(), e.id());
             }
         });
@@ -56,10 +58,11 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
 
     world
         .query::<()>()
-        .with::<flecs::Wildcard>()
+        .with(flecs::Wildcard::ID)
         .build()
-        .run_iter(|it, _| {
+        .run(|it, | {
             if it.count() <= 0 {
+            it.fini();
                 return;
             }
             let arch = it.archetype().unwrap();
@@ -70,6 +73,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                 .collect();
 
             if to_be_serialize.is_empty() {
+            it.fini();
                 return;
             }
 
@@ -78,11 +82,15 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
             let mut snap = ArchetypeSnapshot::default();
             snap.entities.extend(entities.as_slice());
             //hack name id for entity we can save only
-            if it.entity(0).get_name().is_some() {
+        if it.entity(0usize).get_name().is_some() {
                 let ty = "NameID";
                 snap.add_type(ty, None);
                 let col = snap.get_column_mut(ty).unwrap();
                 for (idx, _eid) in entities.iter().enumerate() {
+                println!(
+                    "Set name for entity id {}",
+                    it.entity(idx).get_name().unwrap()
+                );
                     col[idx] = serde_json::to_value(it.entity(idx).get_name().unwrap()).unwrap();
                 }
             }
@@ -99,11 +107,10 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
             }
 
             archs.push(snap);
-        });
+    }) ;
 
     world_snapshot.archetypes.extend(archs);
-    //world.remove_all::<SerializeTarget>();
-    world.remove_all::<NameID>();
+    world.remove_all(NameID::get_id(world));
     world_snapshot
 }
 
@@ -131,15 +138,15 @@ pub fn load_world_arch_snapshot(
                 f(&col[row], &world, entity.id()).unwrap();
             }
         });
-      
     }
   
     world.defer_begin();
     world.new_query::<&NameID>().each_entity(|e, name| {
+        println!("Set name for entity {:?} to {}", e, name.0);
         e.set_name(name.0.as_str());
     });
-
-    world.remove_all::<NameID>();
+    let id = NameID::get_id(world.real_world());
+    world.remove_all(id);
     world.defer_end();
 }
 #[cfg(test)]
@@ -293,7 +300,7 @@ mod test {
         // 3. 保存快照
         let snapshot = save_world_arch_snapshot(&world, &reg);
         let _serialized = toml::to_string_pretty(&snapshot).unwrap();
-
+        println!("Serialized Snapshot:\n{}", _serialized);
         // 4. 重新创建 world
         let mut new_world = World::new();
         load_world_arch_snapshot(&mut new_world, &snapshot, &reg);
@@ -302,7 +309,7 @@ mod test {
         let restored = new_world.try_lookup("entity_0");
         assert!(restored.is_some());
 
-        let p = restored.unwrap().has::<Position>();
+        let p = restored.unwrap().has(Position::id());
         assert!(p);
     }
 }

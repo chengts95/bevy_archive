@@ -23,12 +23,12 @@ pub trait ComponentAccess {
 
 impl ComponentAccess for World {
     unsafe fn get_data_ptr<T: ComponentId>(&self, entity: Entity) -> Option<*const T> {
-        let ptr = unsafe { sys::ecs_get_id(self.world_ptr(), *entity, T::id(self)) };
+        let ptr = unsafe { sys::ecs_get_id(self.world_ptr(), *entity, T::get_id(self)) };
         NonNull::new(ptr as *mut T).map(|nn| nn.as_ptr() as *const T)
     }
 
     unsafe fn get_data_ptr_mut<T: ComponentId>(&self, entity: Entity) -> Option<*mut T> {
-        let ptr = unsafe { sys::ecs_get_mut_id(self.world_ptr(), *entity, T::id(self)) };
+        let ptr = unsafe { sys::ecs_get_mut_id(self.world_ptr(), *entity, T::get_id(self)) };
         NonNull::new(ptr as *mut T).map(|nn| nn.as_ptr())
     }
 }

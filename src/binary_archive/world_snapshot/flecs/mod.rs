@@ -19,9 +19,9 @@ impl WorldArrowSnapshot {
         let mut vec = Vec::new();
         world
             .query::<()>()
-            .with::<Wildcard>()
+            .with(Wildcard)
             .build()
-            .run_iter(|it, _| {
+            .run(|it| {
                 let t = Self::save_archetype_flecs(world, registry, it, &reg_comp_ids);
                 vec.push(t);
             });
@@ -30,7 +30,7 @@ impl WorldArrowSnapshot {
     pub fn save_archetype_flecs<'a>(
         world: &'a World,
         registry: &'a SnapshotRegistry,
-        archetype: TableIter<'a, false>,
+        archetype: TableIter<'a, true>,
         reg_comp_ids: &HashMap<u64, &'a str>,
     ) -> Result<ComponentTable, SnapshotError> {
         if archetype.count() <= 0 {
