@@ -1,6 +1,6 @@
 //! Basic example for the entity_snapshot archive system
 //! Demonstrates full-cycle snapshot: save → serialize → load → verify
-
+//! Cannot work due to upstream issues with flecs wrapper in rust.
 use bevy_archive::archetype_archive::WorldArchSnapshot;
 use bevy_archive::flecs_archsnaphot::*;
 use bevy_archive::flecs_registry::*;
