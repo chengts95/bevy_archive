@@ -2,7 +2,8 @@
 
 ## [0.2.0] - 2025-11-18
 - Disable Flecs due to API limitations of `Flecs-Rust`.
-- 
+- Support Bevy 0.17.x.
+  
 ## [0.2.0] - 2025-10-16
 - Fix memory leak if the struct is not Plain-Old-Data.
 - Initial support for Arrow, parquet and binary format.
