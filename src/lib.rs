@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 pub mod archetype_archive;
 pub mod aurora_archive;
 pub mod bevy_registry;

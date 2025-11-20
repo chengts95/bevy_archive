@@ -1,10 +1,12 @@
 # Changelog
+## [0.2.1] - 2025-11-20
+- Disable Flecs due to API limitations of `Flecs-Rust`.
+- Support Bevy 0.17.x. 
+- Allow reading empty parquet table without failing.
 
 ## [0.2.0] - 2025-11-18
 - Disable Flecs due to API limitations of `Flecs-Rust`.
-- Support Bevy 0.17.x.
-  
-## [0.2.0] - 2025-10-16
+- Support Bevy 0.17.x. 
 - Fix memory leak if the struct is not Plain-Old-Data.
 - Initial support for Arrow, parquet and binary format.
 - Remove placeholder snapshot mode and remove snapshot mode from factories.
