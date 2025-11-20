@@ -157,7 +157,10 @@ impl ComponentTable {
             .with_batch_size(8192)
             .build()?;
 
-        let batches: Vec<_> = reader.map(|b| b.unwrap()).collect();
+        let batches: Vec<_> = reader.collect::<Result<_, _>>()?;
+        if batches.is_empty() {
+            return Ok(ComponentTable::default());
+        }
         let schema = batches[0].schema();
         let batch = concat_batches(&schema, &batches)?;
 

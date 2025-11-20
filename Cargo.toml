@@ -19,7 +19,7 @@ required-features = ["arrow_rs"]
 [features]
 default = ["bevy"]
 bevy = []
-#flecs = ["flecs_ecs","bimap"]
+flecs = []
 arrow_rs = ["dep:serde_arrow","dep:arrow","dep:parquet","dep:bytes","dep:zip" ,"dep:bytemuck","dep:serde_bytes"]
 
 [dependencies]
