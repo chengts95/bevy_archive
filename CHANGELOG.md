@@ -9,6 +9,8 @@
 ### Added
 - `save_single_archetype_snapshot` exposed in `archetype_archive` to support granular text-based saving.
 - `LoadedArchetype` enum in `aurora_archive` to support mixed-format loading.
+- `BlobLoader` trait and `ZipBlobLoader` (feature `arrow_rs`) for flexible archive loading.
+- `examples/hybrid_zip.rs` demonstrating how to save/load a hybrid (Parquet + CSV) archive in a ZIP file.
  
 
 ## [0.2.1] - 2025-11-20
