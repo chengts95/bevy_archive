@@ -17,14 +17,10 @@ impl WorldArrowSnapshot {
             reg_comp_ids.insert(id, *name);
         });
         let mut vec = Vec::new();
-        world
-            .query::<()>()
-            .with(Wildcard)
-            .build()
-            .run(|it| {
-                let t = Self::save_archetype_flecs(world, registry, it, &reg_comp_ids);
-                vec.push(t);
-            });
+        world.query::<()>().with(Wildcard).build().run(|it| {
+            let t = Self::save_archetype_flecs(world, registry, it, &reg_comp_ids);
+            vec.push(t);
+        });
         vec.into_iter().collect()
     }
     pub fn save_archetype_flecs<'a>(

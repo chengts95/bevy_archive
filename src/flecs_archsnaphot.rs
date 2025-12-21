@@ -60,9 +60,9 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
         .query::<()>()
         .with(flecs::Wildcard::ID)
         .build()
-        .run(|it, | {
+        .run(|it| {
             if it.count() <= 0 {
-            it.fini();
+                it.fini();
                 return;
             }
             let arch = it.archetype().unwrap();
@@ -73,7 +73,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
                 .collect();
 
             if to_be_serialize.is_empty() {
-            it.fini();
+                it.fini();
                 return;
             }
 
@@ -82,15 +82,15 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
             let mut snap = ArchetypeSnapshot::default();
             snap.entities.extend(entities.as_slice());
             //hack name id for entity we can save only
-        if it.entity(0usize).get_name().is_some() {
+            if it.entity(0usize).get_name().is_some() {
                 let ty = "NameID";
                 snap.add_type(ty, None);
                 let col = snap.get_column_mut(ty).unwrap();
                 for (idx, _eid) in entities.iter().enumerate() {
-                println!(
-                    "Set name for entity id {}",
-                    it.entity(idx).get_name().unwrap()
-                );
+                    println!(
+                        "Set name for entity id {}",
+                        it.entity(idx).get_name().unwrap()
+                    );
                     col[idx] = serde_json::to_value(it.entity(idx).get_name().unwrap()).unwrap();
                 }
             }
@@ -107,7 +107,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
             }
 
             archs.push(snap);
-    }) ;
+        });
 
     world_snapshot.archetypes.extend(archs);
     world.remove_all(NameID::get_id(world));
@@ -129,7 +129,7 @@ pub fn load_world_arch_snapshot(
             .iter()
             .map(|x| reg.get_factory(x.as_str()).unwrap().js_value.import);
         let entities = artype.entities();
-    
+
         artype.columns.iter().zip(functions).for_each(|(col, f)| {
             for (row, &ent) in entities.iter().enumerate() {
                 let entity = world.entity_from_id(ent as u64);
@@ -139,7 +139,7 @@ pub fn load_world_arch_snapshot(
             }
         });
     }
-  
+
     world.defer_begin();
     world.new_query::<&NameID>().each_entity(|e, name| {
         println!("Set name for entity {:?} to {}", e, name.0);

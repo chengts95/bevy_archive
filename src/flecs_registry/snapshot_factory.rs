@@ -87,7 +87,9 @@ impl SnapshotFactory {
 
 macro_rules! build_common {
     ($t:ty ) => {
-        (SnapshotFactory::component_id::<$t>, |world| <$t>::get_id(world))
+        (SnapshotFactory::component_id::<$t>, |world| {
+            <$t>::get_id(world)
+        })
     };
 }
 

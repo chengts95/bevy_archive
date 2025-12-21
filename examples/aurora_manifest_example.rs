@@ -45,7 +45,6 @@ pub struct Vector2Wrapper {
     pub x: f32,
     pub y: f32,
 }
- 
 
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct ChildOfWrapper(pub u32);

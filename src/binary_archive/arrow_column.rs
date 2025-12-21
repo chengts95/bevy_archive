@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, RecordBatch};
- 
+
 use bevy_ecs::{component::ComponentId, prelude::*};
 
 use arrow::datatypes::FieldRef;
@@ -9,12 +9,10 @@ use parquet::arrow::ArrowWriter;
 
 use serde::{Deserialize, Serialize};
 use serde_arrow::schema::SchemaLike;
-use serde_arrow::schema::TracingOptions; 
+use serde_arrow::schema::TracingOptions;
 use serde_json::Value;
 
 use crate::prelude::ArenaBox;
-
-
 
 #[derive(Default, Clone, Debug)]
 pub struct ArrowColumn {
@@ -120,5 +118,3 @@ pub trait JsonConversion {
     where
         T: for<'de> Deserialize<'de> + Serialize;
 }
-
-

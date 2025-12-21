@@ -243,9 +243,8 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
         .filter_map(|&name| reg.comp_id_by_name(name, &world).map(|cid| (cid, name)))
         .collect();
 
-    let snap = archetypes.map(|archetype| {
-        save_single_archetype_snapshot(world, archetype, reg, &reg_comp_ids)
-    });
+    let snap = archetypes
+        .map(|archetype| save_single_archetype_snapshot(world, archetype, reg, &reg_comp_ids));
     world_snapshot.archetypes.extend(snap);
 
     world_snapshot

@@ -2,8 +2,8 @@ pub mod json;
 
 #[cfg(feature = "arrow_rs")]
 pub mod arrow;
-use std::{ptr::NonNull};
 use flecs_ecs::{prelude::*, sys};
+use std::ptr::NonNull;
 // 🌟 trait 封装：统一访问接口
 pub trait ComponentAccess {
     unsafe fn get_data_ptr<T: ComponentId>(&self, entity: Entity) -> Option<*const T>;
