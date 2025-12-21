@@ -236,6 +236,23 @@ pub struct WorldWithAurora {
     pub embed: HashMap<String, EmbeddedBlob>,
     pub resources: HashMap<String, serde_json::Value>,
 }
+fn serialize_arch_data(arch: &ArchetypeSnapshot, fmt: &ExportFormat) -> (Vec<u8>, &'static str) {
+    match fmt {
+        ExportFormat::Csv => {
+            let csv = columnar_from_snapshot(arch);
+            let mut data = Vec::new();
+            csv.to_csv_writer(&mut data).unwrap();
+            (data, "csv")
+        }
+        ExportFormat::Json => (serde_json::to_vec(arch).unwrap(), "json"),
+        ExportFormat::MsgPack => (rmp_serde::to_vec(arch).unwrap(), "msgpack"),
+        ExportFormat::CsvMsgPack => {
+            let csv = columnar_from_snapshot(arch);
+            (rmp_serde::to_vec(&csv).unwrap(), "csv.msgpack")
+        }
+    }
+}
+
 impl WorldWithAurora {
     pub fn from_guided(world: &WorldArchSnapshot, guidance: &ExportGuidance) -> Self {
         let mut archetypes = Vec::new();
@@ -249,94 +266,47 @@ impl WorldWithAurora {
             let strat = guidance
                 .per_arch
                 .get(&i)
-                .cloned()
-                .unwrap_or_else(|| guidance.default.clone());
+                .unwrap_or(&guidance.default);
 
-            let (source, blob_opt) = match strat {
-                OutputStrategy::Embed(fmt) => {
-                    let blob = match fmt {
-                        ExportFormat::Csv => {
-                            let csv = columnar_from_snapshot(arch);
-                            let mut data = Vec::new();
-                            csv.to_csv_writer(&mut data).unwrap();
-                            EmbeddedBlob {
-                                format: "csv".into(),
-                                data: String::from_utf8(data).unwrap(),
-                            }
-                        }
-                        ExportFormat::MsgPack => {
-                            let bytes = rmp_serde::to_vec(arch).unwrap();
-                            EmbeddedBlob {
-                                format: "msgpack".into(),
-                                data: BASE64_STANDARD.encode(&bytes),
-                            }
-                        }
-                        ExportFormat::CsvMsgPack => {
-                            let csv = columnar_from_snapshot(arch);
-                            let bytes = rmp_serde::to_vec(&csv).unwrap();
-                            EmbeddedBlob {
-                                format: "csv.msgpack".into(),
-                                data: BASE64_STANDARD.encode(&bytes),
-                            }
-                        }
-                        ExportFormat::Json => {
-                            let json = serde_json::to_string(arch).unwrap();
-                            EmbeddedBlob {
-                                format: "json".into(),
-                                data: json,
-                            }
-                        }
-                    };
-                    (Url(format!("embed://arch_{}", i)), Some(blob))
+            let (fmt, base_path) = match strat {
+                OutputStrategy::Embed(f) => (f, None),
+                OutputStrategy::File(f, p) => (f, Some(p)),
+            };
+
+            let (bytes, ext) = serialize_arch_data(arch, fmt);
+            let arch_name = format!("arch_{}", i);
+
+            let (source, blob_opt) = if let Some(base) = base_path {
+                let filename = format!("{}.{}", arch_name, ext);
+                let file_path = base.join(filename);
+                if let Some(parent) = file_path.parent() {
+                    std::fs::create_dir_all(parent).unwrap();
                 }
-
-                OutputStrategy::File(fmt, ref base_path) => {
-                    let ext = match fmt {
-                        ExportFormat::Csv => "csv",
-                        ExportFormat::MsgPack => "msgpack",
-                        ExportFormat::Json => "json",
-                        ExportFormat::CsvMsgPack => "csv.msgpack",
-                    };
-                    let file_path = base_path.join(format!("arch_{}.{}", i, ext));
-                    if let Some(parent) = file_path.parent() {
-                        std::fs::create_dir_all(parent).unwrap();
+                std::fs::write(&file_path, &bytes).unwrap();
+                (Url(format!("file://{}", file_path.display())), None)
+            } else {
+                let data_str = match fmt {
+                    ExportFormat::Csv | ExportFormat::Json => String::from_utf8(bytes).unwrap(),
+                    ExportFormat::MsgPack | ExportFormat::CsvMsgPack => {
+                        BASE64_STANDARD.encode(&bytes)
                     }
-
-                    match fmt {
-                        ExportFormat::Csv => {
-                            let csv = columnar_from_snapshot(arch);
-                            let mut data = Vec::new();
-                            csv.to_csv_writer(&mut data).unwrap();
-                            std::fs::write(&file_path, data).unwrap();
-                        }
-                        ExportFormat::MsgPack => {
-                            let data = rmp_serde::to_vec(arch).unwrap();
-                            std::fs::write(&file_path, &data).unwrap();
-                        }
-                        ExportFormat::Json => {
-                            let json = serde_json::to_string(arch).unwrap();
-                            std::fs::write(&file_path, &json).unwrap();
-                        }
-                        ExportFormat::CsvMsgPack => {
-                            let csv = ColumnarCsv::from(arch);
-                            let msgpack = rmp_serde::to_vec(&csv).unwrap();
-                            std::fs::write(&file_path, &msgpack).unwrap();
-                        }
-                    }
-
-                    (Url(format!("file://{}", file_path.display())), None)
-                }
+                };
+                let blob = EmbeddedBlob {
+                    format: ext.to_string(),
+                    data: data_str,
+                };
+                (Url(format!("embed://{}", arch_name)), Some(blob))
             };
 
             archetypes.push(ArchetypeSpec {
-                name: Some(format!("arch_{}", i)),
+                name: Some(arch_name.clone()),
                 components: arch.component_types.clone(),
                 storage: None,
                 source,
             });
 
             if let Some(blob) = blob_opt {
-                embed.insert(format!("arch_{}", i), blob);
+                embed.insert(arch_name, blob);
             }
         }
 
@@ -352,43 +322,7 @@ impl WorldWithAurora {
 
 impl From<&WorldArchSnapshot> for WorldWithAurora {
     fn from(world: &WorldArchSnapshot) -> Self {
-        let mut archetypes = Vec::new();
-        let mut embed = HashMap::new();
-
-        for (i, arch) in world.archetypes.iter().enumerate() {
-            if arch.is_empty() {
-                continue;
-            }
-            let name = Some(format!("arch_{}", i));
-            let source = Url(format!("embed://arch_{}", i));
-
-            let csv = columnar_from_snapshot(arch);
-            let mut data = Vec::new();
-            csv.to_csv_writer(&mut data).unwrap();
-
-            let blob = EmbeddedBlob {
-                format: "csv".to_string(),
-                data: String::from_utf8(data).unwrap(),
-            };
-
-            embed.insert(format!("arch_{}", i), blob);
-
-            archetypes.push(ArchetypeSpec {
-                name,
-                components: arch.component_types.clone(),
-                //storage: Some(arch.storage_types.clone()),
-                storage: None, //disable this  for now
-                source,
-            });
-        }
-
-        Self {
-            version: "0.1".into(),
-            archetypes,
-            embed,
-            name: None,
-            resources: HashMap::new(),
-        }
+        Self::from_guided(world, &ExportGuidance::embed_all(ExportFormat::Csv))
     }
 }
 
