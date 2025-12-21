@@ -225,6 +225,9 @@ pub enum OutputStrategy {
     Embed(ExportFormat),
 
     File(ExportFormat, std::path::PathBuf),
+    /// Returns the bytes in `external_payloads` instead of writing to disk,
+    /// setting the source to the provided virtual path.
+    Return(ExportFormat, String),
 }
 
 #[derive(Clone)]
@@ -241,6 +244,8 @@ pub struct WorldWithAurora {
     pub archetypes: Vec<ArchetypeSpec>,
     #[serde(default)]
     pub embed: HashMap<String, EmbeddedBlob>,
+    #[serde(skip)]
+    pub external_payloads: HashMap<String, Vec<u8>>,
     pub resources: HashMap<String, serde_json::Value>,
 }
 fn serialize_arch_data(arch: &ArchetypeSnapshot, fmt: &ExportFormat) -> (Vec<u8>, &'static str) {
@@ -258,7 +263,9 @@ fn serialize_arch_data(arch: &ArchetypeSnapshot, fmt: &ExportFormat) -> (Vec<u8>
             (rmp_serde::to_vec(&csv).unwrap(), "csv.msgpack")
         }
         #[cfg(feature = "arrow_rs")]
-        ExportFormat::Parquet => panic!("Parquet should utilize the binary pipeline, not ArchetypeSnapshot"),
+        ExportFormat::Parquet => {
+            panic!("Parquet should utilize the binary pipeline, not ArchetypeSnapshot")
+        }
     }
 }
 
@@ -270,6 +277,7 @@ impl WorldWithAurora {
     ) -> Self {
         let mut archetypes = Vec::new();
         let mut embed = HashMap::new();
+        let mut external_payloads: HashMap<String, Vec<u8>> = HashMap::new();
 
         let reg_comp_ids: HashMap<ComponentId, &str> = registry
             .type_registry
@@ -289,14 +297,12 @@ impl WorldWithAurora {
                 continue;
             }
 
-            let strat = guidance
-                .per_arch
-                .get(&i)
-                .unwrap_or(&guidance.default);
+            let strat = guidance.per_arch.get(&i).unwrap_or(&guidance.default);
 
-            let (fmt, base_path) = match strat {
-                OutputStrategy::Embed(f) => (f, None),
-                OutputStrategy::File(f, p) => (f, Some(p)),
+            let (fmt, base_path, virtual_path) = match strat {
+                OutputStrategy::Embed(f) => (f, None, None),
+                OutputStrategy::File(f, p) => (f, Some(p), None),
+                OutputStrategy::Return(f, v) => (f, None, Some(v.clone())),
             };
 
             let (bytes, ext) = match fmt {
@@ -308,7 +314,7 @@ impl WorldWithAurora {
                         arch,
                         &reg_comp_ids,
                     )
-                    .unwrap(); 
+                    .unwrap();
                     (table.to_parquet().unwrap(), "parquet")
                 }
                 _ => {
@@ -332,6 +338,16 @@ impl WorldWithAurora {
                 }
                 std::fs::write(&file_path, &bytes).unwrap();
                 (Url(format!("file://{}", file_path.display())), None)
+            } else if let Some(v_path) = virtual_path {
+                let filename = format!("{}.{}", arch_name, ext);
+                let full_path = if v_path.ends_with('/') || v_path.is_empty() {
+                    format!("{}{}", v_path, filename)
+                } else {
+                    format!("{}/{}", v_path, filename)
+                };
+
+                external_payloads.insert(full_path.clone(), bytes);
+                (Url(format!("file://{}", full_path)), None)
             } else {
                 let data_str = match fmt {
                     ExportFormat::Csv | ExportFormat::Json => String::from_utf8(bytes).unwrap(),
@@ -347,8 +363,12 @@ impl WorldWithAurora {
                 };
                 (Url(format!("embed://{}", arch_name)), Some(blob))
             };
-            
-            let components: Vec<String> = arch.components().iter().filter_map(|id| reg_comp_ids.get(id).map(|s| s.to_string())).collect();
+
+            let components: Vec<String> = arch
+                .components()
+                .iter()
+                .filter_map(|id| reg_comp_ids.get(id).map(|s| s.to_string()))
+                .collect();
 
             archetypes.push(ArchetypeSpec {
                 name: Some(arch_name.clone()),
@@ -366,6 +386,7 @@ impl WorldWithAurora {
             version: "0.1".into(),
             archetypes,
             embed,
+            external_payloads,
             name: None,
             resources: HashMap::new(),
         }
@@ -404,6 +425,7 @@ impl From<&WorldArchSnapshot> for WorldWithAurora {
             version: "0.1".into(),
             archetypes,
             embed,
+            external_payloads: HashMap::new(),
             name: None,
             resources: HashMap::new(),
         }
@@ -556,21 +578,49 @@ enum LoadedArchetype {
     Arrow(ComponentTable),
 }
 
-/// Load an ECS world from a manifest structure.
-///
-/// Converts the manifest into internal snapshot data and inserts the data into a world.
-///
-/// # Parameters
-/// - `world`: A mutable ECS world to populate.
-/// - `manifest`: The manifest to load from.
-/// - `registry`: Component (de)serialization registry.
-///
-/// # Returns
-/// Ok on success, or a string describing the failure.
-pub fn load_world_manifest(
+/// Trait for abstracting blob loading (Filesystem, Zip, Memory, etc.)
+pub trait BlobLoader {
+    fn load_blob(&mut self, path: &str) -> Result<Vec<u8>, String>;
+}
+
+/// Default filesystem loader
+pub struct FsBlobLoader {
+    pub base_dir: PathBuf,
+}
+impl BlobLoader for FsBlobLoader {
+    fn load_blob(&mut self, path: &str) -> Result<Vec<u8>, String> {
+        let relative_path = Path::new(path);
+        let full_path = if relative_path.is_absolute() {
+            relative_path.to_path_buf()
+        } else {
+            self.base_dir.join(relative_path)
+        };
+        fs::read(&full_path).map_err(|e| format!("Failed to read {}: {}", full_path.display(), e))
+    }
+}
+
+#[cfg(feature = "arrow_rs")]
+pub struct ZipBlobLoader<R: std::io::Read + std::io::Seek> {
+    pub archive: zip::ZipArchive<R>,
+}
+
+#[cfg(feature = "arrow_rs")]
+impl<R: std::io::Read + std::io::Seek> BlobLoader for ZipBlobLoader<R> {
+    fn load_blob(&mut self, path: &str) -> Result<Vec<u8>, String> {
+        use std::io::Read;
+        let mut file = self.archive.by_name(path).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        Ok(buf)
+    }
+}
+
+/// Load an ECS world from a manifest structure using a specific blob loader.
+pub fn load_world_manifest_with_loader<L: BlobLoader>(
     world: &mut World,
     manifest: &AuroraWorldManifest,
     registry: &SnapshotRegistry,
+    loader: &mut L,
 ) -> Result<(), String> {
     let resource = &manifest.world.resources;
     load_world_resource(resource, world, registry);
@@ -579,7 +629,35 @@ pub fn load_world_manifest(
     let mut loaded_archetypes = Vec::new();
     for arch in &manifest.world.archetypes {
         let loc = AuroraLocation::from(arch.source.0.as_str());
-        let blob = load_blob_from_location(&loc, &manifest.world.embed).unwrap();
+
+        // Resolve blob
+        let blob = match loc {
+            AuroraLocation::File(path) => {
+                let bytes = loader.load_blob(&path)?;
+                let format = AuroraFormat::from_path(&path);
+                LoadedBlob { format, bytes }
+            }
+            AuroraLocation::Embed(name) => {
+                let blob =
+                    manifest.world.embed.get(&name).ok_or_else(|| {
+                        format!("Embedded blob '{}' not found in manifest.", name)
+                    })?;
+                let format = AuroraFormat::from_str(&blob.format);
+                let bytes = match format {
+                    AuroraFormat::MsgPack | AuroraFormat::CsvMsgPack => BASE64_STANDARD
+                        .decode(&blob.data)
+                        .map_err(|e| format!("Base64 decode failed: {}", e))?,
+                    #[cfg(feature = "arrow_rs")]
+                    AuroraFormat::Parquet => BASE64_STANDARD
+                        .decode(&blob.data)
+                        .map_err(|e| format!("Base64 decode failed: {}", e))?,
+                    _ => blob.data.as_bytes().to_vec(),
+                };
+                LoadedBlob { format, bytes }
+            }
+            AuroraLocation::Unknown(s) => return Err(format!("Unknown location: {}", s)),
+        };
+
         let parsed = parse_blob(&blob).unwrap();
 
         match parsed {
@@ -640,6 +718,20 @@ pub fn load_world_manifest(
     }
 
     Ok(())
+}
+
+/// Load an ECS world from a manifest structure using default filesystem loading.
+///
+/// This is a convenience wrapper around `load_world_manifest_with_loader`.
+pub fn load_world_manifest(
+    world: &mut World,
+    manifest: &AuroraWorldManifest,
+    registry: &SnapshotRegistry,
+) -> Result<(), String> {
+    let mut loader = FsBlobLoader {
+        base_dir: Path::new(".").to_path_buf(),
+    };
+    load_world_manifest_with_loader(world, manifest, registry, &mut loader)
 }
 
 /// Write a manifest to a file in a specified format.
