@@ -189,6 +189,49 @@ pub fn save_world_resource(
     }
     map
 }
+pub fn save_single_archetype_snapshot(
+    world: &World,
+    archetype: &bevy_ecs::archetype::Archetype,
+    reg: &SnapshotRegistry,
+    reg_comp_ids: &HashMap<ComponentId, &str>,
+) -> ArchetypeSnapshot {
+    let can_be_stored = archetype
+        .components()
+        .iter()
+        .any(|x| reg_comp_ids.contains_key(&x));
+    if !can_be_stored {
+        return ArchetypeSnapshot::default();
+    }
+    let mut archetype_snapshot = ArchetypeSnapshot::default();
+    let entities: Vec<_> = archetype
+        .entities()
+        .iter()
+        .map(|x| x.id().index())
+        .collect();
+    archetype_snapshot.entities.extend(entities.as_slice());
+    let iter = entities;
+    archetype.components().iter().for_each(|x| {
+        if reg_comp_ids.contains_key(&x) {
+            let type_name = reg_comp_ids[&x];
+            let t = archetype.get_storage_type(*x).map(|x| match x {
+                StorageType::Table => StorageTypeFlag::Table,
+                StorageType::SparseSet => StorageTypeFlag::SparseSet,
+            });
+            let f = reg.get_factory(type_name).unwrap().js_value.export;
+            archetype_snapshot.add_type(type_name, t);
+            let col = archetype_snapshot.get_column_mut(type_name).unwrap();
+            for (idx, &entity) in iter.iter().enumerate() {
+                let entity = EntityRow::from_raw_u32(entity as u32).unwrap();
+                let entity = world.entities().resolve_from_id(entity).unwrap();
+                let serialized = f(world, entity).unwrap();
+                col[idx] = serialized;
+            }
+        }
+    });
+
+    archetype_snapshot
+}
+
 pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldArchSnapshot {
     let mut world_snapshot = WorldArchSnapshot::default();
     world_snapshot.entities = WorldExt::iter_entities(world).map(|e| e.index()).collect();
@@ -201,41 +244,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
         .collect();
 
     let snap = archetypes.map(|archetype| {
-        let can_be_stored = archetype
-            .components()
-            .iter()
-            .any(|x| reg_comp_ids.contains_key(&x));
-        if !can_be_stored {
-            return ArchetypeSnapshot::default();
-        }
-        let mut archetype_snapshot = ArchetypeSnapshot::default();
-        let entities: Vec<_> = archetype
-            .entities()
-            .iter()
-            .map(|x| x.id().index())
-            .collect();
-        archetype_snapshot.entities.extend(entities.as_slice());
-        let iter = entities;
-        archetype.components().iter().for_each(|x| {
-            if reg_comp_ids.contains_key(&x) {
-                let type_name = reg_comp_ids[&x];
-                let t = archetype.get_storage_type(*x).map(|x| match x {
-                    StorageType::Table => StorageTypeFlag::Table,
-                    StorageType::SparseSet => StorageTypeFlag::SparseSet,
-                });
-                let f = reg.get_factory(type_name).unwrap().js_value.export;
-                archetype_snapshot.add_type(type_name, t);
-                let col = archetype_snapshot.get_column_mut(type_name).unwrap();
-                for (idx, &entity) in iter.iter().enumerate() {
-                    let entity = EntityRow::from_raw_u32(entity as u32).unwrap();
-                    let entity = world.entities().resolve_from_id(entity).unwrap();
-                    let serialized = f(world, entity).unwrap();
-                    col[idx] = serialized;
-                }
-            }
-        });
-
-        archetype_snapshot
+        save_single_archetype_snapshot(world, archetype, reg, &reg_comp_ids)
     });
     world_snapshot.archetypes.extend(snap);
 

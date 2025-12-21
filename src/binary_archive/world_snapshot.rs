@@ -69,37 +69,7 @@ impl WorldArrowSnapshot {
         I: Iterator<Item = &'a Archetype> + 'a,
     {
         archetypes.map(move |archetype| {
-            let can_be_stored = archetype
-                .components()
-                .iter()
-                .any(|x| reg_comp_ids.contains_key(&x));
-
-            if !can_be_stored {
-                return Ok(ComponentTable::default());
-            }
-
-            let mut archetype_snapshot = ComponentTable::default();
-            let entities: Vec<_> = archetype.entities().iter().map(|x| x.id()).collect();
-
-            let entities_ids: Vec<_> = entities
-                .iter()
-                .map(|&id| EntityID { id: id.index() })
-                .collect();
-            archetype_snapshot.entities.extend(entities_ids);
-
-            for cid in archetype.components() {
-                if let Some(&type_name) = reg_comp_ids.get(&cid) {
-                    let arrow = registry
-                        .get_factory(type_name)
-                        .and_then(|f| f.arrow.as_ref())
-                        .ok_or_else(|| SnapshotError::MissingFactory(type_name.to_string()))?;
-
-                    let column = (arrow.arr_export)(&arrow.schema, world, &entities)?;
-                    archetype_snapshot.insert_column(type_name, column);
-                }
-            }
-
-            Ok(archetype_snapshot)
+            save_arrow_archetype_from_world(world, registry, archetype, &reg_comp_ids)
         })
     }
 
@@ -126,6 +96,45 @@ impl WorldArrowSnapshot {
 
         Ok(map)
     }
+}
+
+pub fn save_arrow_archetype_from_world<'a>(
+    world: &'a World,
+    registry: &'a SnapshotRegistry,
+    archetype: &'a Archetype,
+    reg_comp_ids: &HashMap<ComponentId, &'a str>,
+) -> Result<ComponentTable, SnapshotError> {
+    let can_be_stored = archetype
+        .components()
+        .iter()
+        .any(|x| reg_comp_ids.contains_key(&x));
+
+    if !can_be_stored {
+        return Ok(ComponentTable::default());
+    }
+
+    let mut archetype_snapshot = ComponentTable::default();
+    let entities: Vec<_> = archetype.entities().iter().map(|x| x.id()).collect();
+
+    let entities_ids: Vec<_> = entities
+        .iter()
+        .map(|&id| EntityID { id: id.index() })
+        .collect();
+    archetype_snapshot.entities.extend(entities_ids);
+
+    for cid in archetype.components() {
+        if let Some(&type_name) = reg_comp_ids.get(&cid) {
+            let arrow = registry
+                .get_factory(type_name)
+                .and_then(|f| f.arrow.as_ref())
+                .ok_or_else(|| SnapshotError::MissingFactory(type_name.to_string()))?;
+
+            let column = (arrow.arr_export)(&arrow.schema, world, &entities)?;
+            archetype_snapshot.insert_column(type_name, column);
+        }
+    }
+
+    Ok(archetype_snapshot)
 }
 
 fn count_entities(snapshot: &[u32]) -> u32 {
@@ -174,47 +183,57 @@ impl WorldArrowSnapshot {
         Self::load_world_resource(&self.resources, world, reg)?;
         let mut bump = bumpalo::Bump::new();
         for archetype in &self.archetypes {
-            let mut columns = Vec::new();
-            let types = archetype.columns();
-
-            for (type_name, data) in types {
-                if let Some(arrow) = reg.get_factory(type_name).and_then(|x| x.arrow.as_ref()) {
-                    let comp_id = reg
-                        .comp_id_by_name(type_name.as_str(), world)
-                        .or_else(|| Some(reg.reg_by_name(type_name, world)))
-                        .unwrap();
-                    let mode = unsafe { reg.get_factory(type_name).unwrap_unchecked().mode };
-                    let data = (arrow.arr_dyn)(data, &bump, world)?;
-                    let raw_vec = RawTData { comp_id, data };
-                    columns.push((mode, raw_vec));
-                } else {
-                    println!("warning type {} cannot be converted", type_name);
-                }
-            }
-            for id in archetype.entities.iter().rev() {
-                let entity = world
-                    .entities()
-                    .resolve_from_id(EntityRow::from_raw_u32(id.id as u32).unwrap())
-                    .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
-                let mut builder = DeferredEntityBuilder::new(world, &bump, entity);
-                for (mode, raw) in &mut columns {
-                    let ptr = raw.data.pop().unwrap();
-                    match mode {
-                        SnapshotMode::Full => {
-                            builder.insert_by_id(raw.comp_id, ptr);
-                        }
-                        crate::prelude::SnapshotMode::EmplaceIfNotExists => {
-                            builder.insert_if_new_by_id(raw.comp_id, ptr);
-                        }
-                    }
-                }
-                builder.commit();
-            }
-
-            bump.reset();
+            load_arrow_archetype_to_world(world, reg, archetype, &mut bump)?;
         }
         Ok(())
     }
+}
+
+pub fn load_arrow_archetype_to_world(
+    world: &mut World,
+    reg: &SnapshotRegistry,
+    archetype: &ComponentTable,
+    bump: &mut bumpalo::Bump,
+) -> Result<(), SnapshotError> {
+    let mut columns = Vec::new();
+    let types = archetype.columns();
+
+    for (type_name, data) in types {
+        if let Some(arrow) = reg.get_factory(type_name).and_then(|x| x.arrow.as_ref()) {
+            let comp_id = reg
+                .comp_id_by_name(type_name.as_str(), world)
+                .or_else(|| Some(reg.reg_by_name(type_name, world)))
+                .unwrap();
+            let mode = unsafe { reg.get_factory(type_name).unwrap_unchecked().mode };
+            let data = (arrow.arr_dyn)(data, bump, world)?;
+            let raw_vec = RawTData { comp_id, data };
+            columns.push((mode, raw_vec));
+        } else {
+            println!("warning type {} cannot be converted", type_name);
+        }
+    }
+    for id in archetype.entities.iter().rev() {
+        let entity = world
+            .entities()
+            .resolve_from_id(EntityRow::from_raw_u32(id.id as u32).unwrap())
+            .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
+        let mut builder = DeferredEntityBuilder::new(world, bump, entity);
+        for (mode, raw) in &mut columns {
+            let ptr = raw.data.pop().unwrap();
+            match mode {
+                SnapshotMode::Full => {
+                    builder.insert_by_id(raw.comp_id, ptr);
+                }
+                crate::prelude::SnapshotMode::EmplaceIfNotExists => {
+                    builder.insert_if_new_by_id(raw.comp_id, ptr);
+                }
+            }
+        }
+        builder.commit();
+    }
+
+    bump.reset();
+    Ok(())
 }
 
 use bevy_ecs::archetype::Archetype;

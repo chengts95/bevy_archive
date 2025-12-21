@@ -8,6 +8,7 @@
 
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
+use bevy_ecs::component::ComponentId;
 use bevy_ecs::world::World;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -149,6 +150,10 @@ pub fn load_blob_from_location_with_base(
                 AuroraFormat::MsgPack | AuroraFormat::CsvMsgPack => BASE64_STANDARD
                     .decode(&blob.data)
                     .map_err(|e| format!("Base64 decode failed: {}", e))?,
+                #[cfg(feature = "arrow_rs")]
+                AuroraFormat::Parquet => BASE64_STANDARD
+                    .decode(&blob.data)
+                    .map_err(|e| format!("Base64 decode failed: {}", e))?,
                 _ => blob.data.as_bytes().to_vec(),
             };
 
@@ -206,6 +211,8 @@ pub enum ExportFormat {
     Json,
     MsgPack,
     CsvMsgPack,
+    #[cfg(feature = "arrow_rs")]
+    Parquet,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -250,16 +257,35 @@ fn serialize_arch_data(arch: &ArchetypeSnapshot, fmt: &ExportFormat) -> (Vec<u8>
             let csv = columnar_from_snapshot(arch);
             (rmp_serde::to_vec(&csv).unwrap(), "csv.msgpack")
         }
+        #[cfg(feature = "arrow_rs")]
+        ExportFormat::Parquet => panic!("Parquet should utilize the binary pipeline, not ArchetypeSnapshot"),
     }
 }
 
 impl WorldWithAurora {
-    pub fn from_guided(world: &WorldArchSnapshot, guidance: &ExportGuidance) -> Self {
+    pub fn from_guided(
+        world: &World,
+        registry: &SnapshotRegistry,
+        guidance: &ExportGuidance,
+    ) -> Self {
         let mut archetypes = Vec::new();
         let mut embed = HashMap::new();
 
-        for (i, arch) in world.archetypes.iter().enumerate() {
+        let reg_comp_ids: HashMap<ComponentId, &str> = registry
+            .type_registry
+            .keys()
+            .filter_map(|&name| registry.comp_id_by_name(name, world).map(|cid| (cid, name)))
+            .collect();
+
+        for (i, arch) in world.archetypes().iter().enumerate() {
             if arch.is_empty() {
+                continue;
+            }
+            if !arch
+                .components()
+                .iter()
+                .any(|x| reg_comp_ids.contains_key(x))
+            {
                 continue;
             }
 
@@ -273,7 +299,29 @@ impl WorldWithAurora {
                 OutputStrategy::File(f, p) => (f, Some(p)),
             };
 
-            let (bytes, ext) = serialize_arch_data(arch, fmt);
+            let (bytes, ext) = match fmt {
+                #[cfg(feature = "arrow_rs")]
+                ExportFormat::Parquet => {
+                    let table = crate::binary_archive::save_arrow_archetype_from_world(
+                        world,
+                        registry,
+                        arch,
+                        &reg_comp_ids,
+                    )
+                    .unwrap(); 
+                    (table.to_parquet().unwrap(), "parquet")
+                }
+                _ => {
+                    let snap = crate::archetype_archive::save_single_archetype_snapshot(
+                        world,
+                        arch,
+                        registry,
+                        &reg_comp_ids,
+                    );
+                    serialize_arch_data(&snap, fmt)
+                }
+            };
+
             let arch_name = format!("arch_{}", i);
 
             let (source, blob_opt) = if let Some(base) = base_path {
@@ -290,6 +338,8 @@ impl WorldWithAurora {
                     ExportFormat::MsgPack | ExportFormat::CsvMsgPack => {
                         BASE64_STANDARD.encode(&bytes)
                     }
+                    #[cfg(feature = "arrow_rs")]
+                    ExportFormat::Parquet => BASE64_STANDARD.encode(&bytes),
                 };
                 let blob = EmbeddedBlob {
                     format: ext.to_string(),
@@ -297,10 +347,12 @@ impl WorldWithAurora {
                 };
                 (Url(format!("embed://{}", arch_name)), Some(blob))
             };
+            
+            let components: Vec<String> = arch.components().iter().filter_map(|id| reg_comp_ids.get(id).map(|s| s.to_string())).collect();
 
             archetypes.push(ArchetypeSpec {
                 name: Some(arch_name.clone()),
-                components: arch.component_types.clone(),
+                components,
                 storage: None,
                 source,
             });
@@ -322,7 +374,39 @@ impl WorldWithAurora {
 
 impl From<&WorldArchSnapshot> for WorldWithAurora {
     fn from(world: &WorldArchSnapshot) -> Self {
-        Self::from_guided(world, &ExportGuidance::embed_all(ExportFormat::Csv))
+        let mut archetypes = Vec::new();
+        let mut embed = HashMap::new();
+
+        for (i, arch) in world.archetypes.iter().enumerate() {
+            if arch.is_empty() {
+                continue;
+            }
+            let name = Some(format!("arch_{}", i));
+            let source = Url(format!("embed://arch_{}", i));
+
+            let (bytes, _ext) = serialize_arch_data(arch, &ExportFormat::Csv);
+            let blob = EmbeddedBlob {
+                format: "csv".to_string(),
+                data: String::from_utf8(bytes).unwrap(),
+            };
+
+            embed.insert(format!("arch_{}", i), blob);
+
+            archetypes.push(ArchetypeSpec {
+                name,
+                components: arch.component_types.clone(),
+                storage: None,
+                source,
+            });
+        }
+
+        Self {
+            version: "0.1".into(),
+            archetypes,
+            embed,
+            name: None,
+            resources: HashMap::new(),
+        }
     }
 }
 
@@ -466,6 +550,12 @@ pub fn save_world_manifest(
     })
 }
 
+enum LoadedArchetype {
+    Legacy(ArchetypeSnapshot),
+    #[cfg(feature = "arrow_rs")]
+    Arrow(ComponentTable),
+}
+
 /// Load an ECS world from a manifest structure.
 ///
 /// Converts the manifest into internal snapshot data and inserts the data into a world.
@@ -483,9 +573,72 @@ pub fn load_world_manifest(
     registry: &SnapshotRegistry,
 ) -> Result<(), String> {
     let resource = &manifest.world.resources;
-    let snapshot: WorldArchSnapshot = (&manifest.world).into();
     load_world_resource(resource, world, registry);
-    load_world_arch_snapshot(world, &snapshot, registry);
+
+    // Parse all blobs first
+    let mut loaded_archetypes = Vec::new();
+    for arch in &manifest.world.archetypes {
+        let loc = AuroraLocation::from(arch.source.0.as_str());
+        let blob = load_blob_from_location(&loc, &manifest.world.embed).unwrap();
+        let parsed = parse_blob(&blob).unwrap();
+
+        match parsed {
+            AuroraInternalFormat::ColumnarCsv(csv) => {
+                let mut snap: ArchetypeSnapshot = (&csv).into();
+                snap.storage_types = arch
+                    .storage
+                    .clone()
+                    .unwrap_or(vec![StorageTypeFlag::Table; snap.component_types.len()]);
+                loaded_archetypes.push(LoadedArchetype::Legacy(snap));
+            }
+            AuroraInternalFormat::ArchetypeSnapshot(data) => {
+                loaded_archetypes.push(LoadedArchetype::Legacy(data));
+            }
+            #[cfg(feature = "arrow_rs")]
+            AuroraInternalFormat::ArrowComponentTable(table) => {
+                loaded_archetypes.push(LoadedArchetype::Arrow(table));
+            }
+        }
+    }
+
+    // Reserve entities
+    let mut max_entity = 0;
+    for arch in &loaded_archetypes {
+        let max = match arch {
+            LoadedArchetype::Legacy(s) => s.entities.iter().max().copied().unwrap_or(0),
+            #[cfg(feature = "arrow_rs")]
+            LoadedArchetype::Arrow(t) => t.entities.iter().map(|e| e.id).max().unwrap_or(0),
+        };
+        if max > max_entity {
+            max_entity = max;
+        }
+    }
+    world.entities().reserve_entities(max_entity + 1);
+    world.flush();
+
+    // Load data
+    #[cfg(feature = "arrow_rs")]
+    let mut bump = bumpalo::Bump::new();
+
+    for arch in loaded_archetypes {
+        match arch {
+            LoadedArchetype::Legacy(snap) => {
+                let temp_snap = WorldArchSnapshot {
+                    entities: vec![], // Not used by defragment loader for reservation if we did it already
+                    archetypes: vec![snap],
+                };
+                load_world_arch_snapshot(world, &temp_snap, registry);
+            }
+            #[cfg(feature = "arrow_rs")]
+            LoadedArchetype::Arrow(table) => {
+                crate::binary_archive::load_arrow_archetype_to_world(
+                    world, &registry, &table, &mut bump,
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -562,8 +715,7 @@ pub fn save_world_manifest_with_guidance(
     registry: &SnapshotRegistry,
     guidance: &ExportGuidance,
 ) -> Result<AuroraWorldManifest, String> {
-    let snapshot = save_world_arch_snapshot(world, registry);
-    let mut world_with_aurora = WorldWithAurora::from_guided(&snapshot, guidance);
+    let mut world_with_aurora = WorldWithAurora::from_guided(world, registry, guidance);
     world_with_aurora.resources = save_world_resource(world, registry);
     Ok(AuroraWorldManifest {
         metadata: None,
@@ -778,5 +930,27 @@ mod tests {
 
         fs::remove_file(path).ok();
         fs::remove_dir_all(arch_type_path).ok();
+    }
+
+    #[test]
+    #[cfg(feature = "arrow_rs")]
+    fn test_parquet_manifest_snapshot_roundtrip() {
+        let path = "test_parquet.toml";
+        let (world, registry) = init_world();
+        let guide = ExportGuidance::embed_all(ExportFormat::Parquet);
+
+        let snapshot = save_world_manifest_with_guidance(&world, &registry, &guide).unwrap();
+        snapshot.to_file(path, None).unwrap();
+
+        assert!(Path::new(path).exists(), "File not written");
+
+        let toml = fs::read_to_string(path).unwrap();
+        let deserialized: AuroraWorldManifest =
+            toml::from_str(&toml).expect("Failed to deserialize TOML");
+
+        let mut world2 = World::new();
+        load_world_manifest(&mut world2, &snapshot, &registry).unwrap();
+        load_world_manifest(&mut world2, &deserialized, &registry).unwrap();
+        fs::remove_file(path).ok();
     }
 }

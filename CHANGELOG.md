@@ -1,4 +1,16 @@
 # Changelog
+## [0.3.0] - 2025-12-20
+### Architectural Improvements (Aurora Hybrid Pipeline)
+- **Direct-to-World Binary I/O:** `binary_archive` now exposes `save_arrow_archetype_from_world` and `load_arrow_archetype_to_world`, allowing `aurora_archive` to perform high-performance binary operations directly against the Bevy World without intermediate conversions.
+- **Hybrid Manifest Generation:** `WorldWithAurora::from_guided` now acts as a coordinator. It iterates the ECS World once and dispatches archetype saving to either the Legacy path (Text/JSON via `ArchetypeSnapshot`) or the Binary path (Arrow/Parquet via `ComponentTable`), depending on the `ExportGuidance`. This avoids forcing binary data through the inefficient `serde_json::Value` intermediate representation.
+- **Unified Loader with Type Safety:** `load_world_manifest` now uses an internal `LoadedArchetype` enum to handle the heterogeneous list of loaded blobs (Legacy vs Arrow) and dispatches them to their respective optimized loaders.
+- **Strict Pipeline Separation:** `ExportFormat::Parquet` is now strictly enforced to use the binary pipeline. Attempting to mix Parquet with the legacy JSON-based `ArchetypeSnapshot` path is prevented to ensure type fidelity and performance.
+
+### Added
+- `save_single_archetype_snapshot` exposed in `archetype_archive` to support granular text-based saving.
+- `LoadedArchetype` enum in `aurora_archive` to support mixed-format loading.
+ 
+
 ## [0.2.1] - 2025-11-20
 - Disable Flecs due to API limitations of `Flecs-Rust`.
 - Support Bevy 0.17.x. 
