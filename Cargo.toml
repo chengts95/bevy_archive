@@ -15,6 +15,9 @@ required-features = ["flecs"]
 [[example]]
 name = "arrow_archive_example"
 required-features = ["arrow_rs"]
+[[example]]
+name = "hybrid_zip"
+required-features = ["arrow_rs"]
 
 [features]
 default = ["bevy"]
