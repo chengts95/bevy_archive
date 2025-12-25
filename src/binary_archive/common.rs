@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SparseSegment {
@@ -7,6 +8,7 @@ pub enum SparseSegment {
     /// A continuous range [start, end], inclusive
     Range(u32, u32),
 }
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparseU32List {
     /// Compressed segments of the original list
@@ -38,7 +40,7 @@ impl SparseU32List {
         Self { segments }
     }
 
-    /// 解压回 Vec<u32>
+    /// Decompress to Vec<u32>
     pub fn to_vec(&self) -> Vec<u32> {
         let mut out = Vec::new();
         for seg in &self.segments {
@@ -50,5 +52,30 @@ impl SparseU32List {
             }
         }
         out
+    }
+}
+
+#[derive(Serialize, Clone, Debug, Default, Deserialize)]
+pub struct BinBlob(#[serde(with = "serde_bytes")] pub Vec<u8>);
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
+pub enum BinFormat {
+    #[default]
+    Parquet,
+    MsgPack,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorldBinArchSnapshot {
+    pub entities: SparseU32List,
+    pub archetypes: Vec<BinBlob>,
+    pub resources: HashMap<String, BinBlob>,
+    pub format: BinFormat,
+    pub meta: HashMap<String, String>,
+}
+
+impl WorldBinArchSnapshot {
+    pub fn to_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+        rmp_serde::to_vec(self)
     }
 }

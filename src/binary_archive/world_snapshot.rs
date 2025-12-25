@@ -2,23 +2,20 @@ use crate::binary_archive::arrow_column::RawTData;
 use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
 #[cfg(feature = "flecs")]
 pub mod flecs;
-mod sparse_entitiy_list;
 mod zip_snapshot;
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
-pub enum BinFormat {
-    #[default]
-    Parquet,
-    MsgPack,
-}
+
 use crate::{
     archetype_archive::WorldExt,
     arrow_snapshot::{ComponentTable, EntityID},
+    binary_archive::common::*, // Import common types
     prelude::{
         DeferredEntityBuilder, SnapshotMode, SnapshotRegistry, vec_snapshot_factory::SnapshotError,
     },
 };
+
 #[derive(Debug, Clone, Default)]
 pub struct WorldArrowSnapshot {
     pub entities: Vec<u32>,
@@ -238,23 +235,6 @@ pub fn load_arrow_archetype_to_world(
 
 use bevy_ecs::archetype::Archetype;
 
-#[derive(Serialize, Clone, Debug, Default, Deserialize)]
-pub struct BinBlob(#[serde(with = "serde_bytes")] pub Vec<u8>);
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct WorldBinArchSnapshot {
-    pub entities: sparse_entitiy_list::SparseU32List,
-    pub archetypes: Vec<BinBlob>,
-    pub resources: HashMap<String, BinBlob>,
-    pub format: BinFormat,
-    pub meta: HashMap<String, String>,
-}
-
-impl WorldBinArchSnapshot {
-    pub fn to_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
-        rmp_serde::to_vec(self)
-    }
-}
 impl From<WorldArrowSnapshot> for WorldBinArchSnapshot {
     fn from(value: WorldArrowSnapshot) -> Self {
         let archetypes = value
@@ -262,7 +242,7 @@ impl From<WorldArrowSnapshot> for WorldBinArchSnapshot {
             .iter()
             .map(|x| BinBlob(x.to_parquet().unwrap()))
             .collect();
-        let entities = sparse_entitiy_list::SparseU32List::from_unsorted(value.entities);
+        let entities = SparseU32List::from_unsorted(value.entities);
         Self {
             entities,
             archetypes,

@@ -23,7 +23,7 @@ required-features = ["arrow_rs"]
 default = ["bevy"]
 bevy = []
 flecs = []
-arrow_rs = ["dep:serde_arrow","dep:arrow","dep:parquet","dep:bytes","dep:zip" ,"dep:bytemuck","dep:serde_bytes"]
+arrow_rs = ["dep:serde_arrow","dep:arrow","dep:parquet","dep:bytes","dep:zip" ,"dep:bytemuck"]
 
 [dependencies]
 bevy_ecs = {version = "^0.17.0", default-features=false ,features=[]}
@@ -43,4 +43,4 @@ bytes = {version = "^1.10.1", optional = true}
 thiserror = "^2.0.16"
 zip = {version ="5.1.1",optional = true}
 bytemuck = {version ="1.23.2",optional = true}
-serde_bytes ={version ="^0.11.19",optional = true} 
+serde_bytes ={version ="^0.11.19"} 
