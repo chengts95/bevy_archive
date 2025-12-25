@@ -1,4 +1,4 @@
-use bevy_ecs::ptr::{Aligned, OwningPtr};
+use bevy_ecs::ptr::{Aligned, OwningPtr, PtrMut};
 use bevy_ecs::{component::ComponentId, prelude::*};
 use bumpalo::Bump;
 use serde::Serialize;
@@ -35,6 +35,12 @@ impl<'a> ArenaBox<'a> {
     pub fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
     }
+}
+pub struct ComponentFactory {
+    pub remap_ids: Option<Box<dyn Fn(&mut PtrMut, &dyn EntityRemapper)>>,
+}
+pub trait EntityRemapper {
+    fn map(&self, old_id: u32) -> Entity;
 }
 
 pub struct DeferredEntityBuilder<'w, 'a> {
