@@ -9,8 +9,7 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 use crate::arrow_snapshot::ComponentTable;
 use crate::binary_archive::BinBlob;
 use crate::binary_archive::WorldArrowSnapshot;
-use crate::binary_archive::world_snapshot::sparse_entitiy_list;
-use crate::binary_archive::world_snapshot::sparse_entitiy_list::SparseU32List;
+use crate::binary_archive::common::SparseU32List;
 use crate::prelude::vec_snapshot_factory::SnapshotError;
 // === Magic string 常量区（全局唯一入口） ===
 const META_TOML: &str = "meta.toml";
@@ -60,7 +59,7 @@ impl WorldArrowSnapshot {
         zip.write_all(meta_toml.as_bytes())?;
 
         // 2. entities
-        let entity_bytes = sparse_entitiy_list::SparseU32List::from_unsorted(self.entities.clone());
+        let entity_bytes = SparseU32List::from_unsorted(self.entities.clone());
         zip.start_file(ENTITIES_MSGPACK, options)?;
         zip.write_all(&rmp_serde::to_vec(&entity_bytes)?)?;
 

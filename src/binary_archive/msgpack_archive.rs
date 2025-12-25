@@ -107,8 +107,7 @@ impl MsgPackArchive {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use bevy_ecs::prelude::*;
+    use super::*; 
     use serde::{Deserialize, Serialize};
 
     #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]

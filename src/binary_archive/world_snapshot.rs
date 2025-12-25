@@ -1,6 +1,6 @@
 use crate::binary_archive::arrow_column::RawTData;
 use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
-use serde::{Deserialize, Serialize};
+ 
 use std::collections::HashMap;
 
 #[cfg(feature = "flecs")]

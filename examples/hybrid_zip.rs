@@ -65,7 +65,7 @@ fn main() {
     // Load from ZIP
     let mut new_world = World::new();
     let file = std::fs::File::open("hybrid.zip").unwrap();
-    let mut archive = zip::ZipArchive::new(file).unwrap();
+    let  archive = zip::ZipArchive::new(file).unwrap();
 
     // We need a loader that implements BlobLoader
     let mut loader = ZipBlobLoader { archive };
@@ -87,7 +87,7 @@ fn main() {
 
     // Verify
     let mut loaded_count = 0;
-    for e in new_world.iter_entities() {
+    for e in new_world.query::<EntityRef>().iter(& new_world) {
         let id = e.id();
         if let Some(pos) = new_world.get::<Position>(id) {
             println!(" - Entity {:?} has Position: {}, {}", id, pos.x, pos.y);
