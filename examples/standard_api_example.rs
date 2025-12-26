@@ -1,5 +1,7 @@
 use bevy_archive::prelude::*;
 use bevy_archive::binary_archive::msgpack_archive::MsgPackArchive;
+#[cfg(feature = "arrow_rs")]
+use bevy_archive::binary_archive::WorldArrowSnapshot;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -40,6 +42,13 @@ fn main() {
     // Test WorldSnapshot (JSON)
     println!("\n--- Testing WorldSnapshot (JSON) ---");
     test_archive::<WorldSnapshot>(&world, &registry, "test_snapshot.json");
+    
+    #[cfg(feature = "arrow_rs")]
+    {
+        // Test WorldArrowSnapshot (ZIP)
+        println!("\n--- Testing WorldArrowSnapshot (ZIP) ---");
+        test_archive::<WorldArrowSnapshot>(&world, &registry, "test_save.zip");
+    }
 }
 
 fn test_archive<A: Archive>(src_world: &World, registry: &SnapshotRegistry, path: &str) {

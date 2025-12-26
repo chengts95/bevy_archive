@@ -74,6 +74,10 @@ impl Archive for WorldSnapshot {
         Ok(())
     }
 
+    fn get_entities(&self) -> Vec<u32> {
+        self.entities.iter().map(|e| e.id as u32).collect()
+    }
+
     fn save_to(
         &self,
         path: impl AsRef<Path>,

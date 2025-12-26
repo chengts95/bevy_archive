@@ -39,4 +39,18 @@ pub trait Archive: Sized {
     fn load_from(
         path: impl AsRef<Path>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get all entity IDs present in this archive.
+    fn get_entities(&self) -> Vec<u32> {
+        vec![]
+    }
+
+    /// Manually load resources from the archive into the world.
+    fn load_resources(
+        &self,
+        _world: &mut World,
+        _registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
 }

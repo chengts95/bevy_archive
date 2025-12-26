@@ -2,6 +2,9 @@ use crate::binary_archive::arrow_column::RawTData;
 use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
  
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::path::Path;
+use std::fs::File;
 
 #[cfg(feature = "flecs")]
 pub mod flecs;
@@ -14,6 +17,8 @@ use crate::{
     prelude::{
         DeferredEntityBuilder, SnapshotMode, SnapshotRegistry, vec_snapshot_factory::SnapshotError,
     },
+    bevy_registry::{IDRemapRegistry, EntityRemapper},
+    traits::Archive,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -22,6 +27,69 @@ pub struct WorldArrowSnapshot {
     pub archetypes: Vec<ComponentTable>,
     pub resources: HashMap<String, BinBlob>,
     pub meta: HashMap<String, String>,
+}
+
+impl Archive for WorldArrowSnapshot {
+    fn create(
+        world: &World,
+        registry: &SnapshotRegistry,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::from_world_reg(world, registry).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))
+    }
+
+    fn apply(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.to_world_reg(world, registry).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))
+    }
+
+    fn apply_with_remap(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+        id_registry: &IDRemapRegistry,
+        mapper: &dyn EntityRemapper,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Self::load_world_resource(&self.resources, world, registry).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
+        let mut bump = bumpalo::Bump::new();
+        for archetype in &self.archetypes {
+            load_arrow_archetype_with_remap(world, registry, id_registry, archetype, &mut bump, mapper).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
+        }
+        Ok(())
+    }
+
+    fn get_entities(&self) -> Vec<u32> {
+        self.entities.clone()
+    }
+
+    fn load_resources(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Self::load_world_resource(&self.resources, world, registry).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))
+    }
+
+    fn save_to(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let bytes = self.to_zip(None).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
+        let mut file = File::create(path)?;
+        file.write_all(&bytes)?;
+        Ok(())
+    }
+
+    fn load_from(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let mut file = File::open(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Self::from_zip(&bytes).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))
+    }
 }
 
 impl WorldArrowSnapshot {
@@ -223,6 +291,69 @@ pub fn load_arrow_archetype_to_world(
                 }
                 crate::prelude::SnapshotMode::EmplaceIfNotExists => {
                     builder.insert_if_new_by_id(raw.comp_id, ptr);
+                }
+            }
+        }
+        builder.commit();
+    }
+
+    bump.reset();
+    Ok(())
+}
+
+pub fn load_arrow_archetype_with_remap(
+    world: &mut World,
+    reg: &SnapshotRegistry,
+    id_reg: &IDRemapRegistry,
+    archetype: &ComponentTable,
+    bump: &mut bumpalo::Bump,
+    mapper: &dyn EntityRemapper,
+) -> Result<(), SnapshotError> {
+    let mut columns = Vec::new();
+    let types = archetype.columns();
+
+    for (type_name, data) in types {
+        if let Some(factory) = reg.get_factory(type_name) {
+            if let Some(arrow) = factory.arrow.as_ref() {
+                let comp_id = reg
+                    .comp_id_by_name(type_name.as_str(), world)
+                    .or_else(|| Some(reg.reg_by_name(type_name, world)))
+                    .unwrap();
+                let mode = factory.mode;
+                let data = (arrow.arr_dyn)(data, bump, world)?;
+                let type_id = reg.type_registry.get(type_name.as_str()).cloned();
+                let hook = type_id.and_then(|tid| id_reg.get_hook(tid));
+                
+                let raw_vec = RawTData { comp_id, data };
+                columns.push((mode, raw_vec, hook));
+            }
+        } else {
+            println!("warning type {} cannot be converted", type_name);
+        }
+    }
+
+    for id in archetype.entities.iter().rev() {
+        let current_entity = mapper.map(id.id as u32);
+        if current_entity == Entity::PLACEHOLDER {
+             panic!("Entity mapping failure: Old ID {} mapped to PLACEHOLDER", id.id);
+        }
+
+        let mut builder = DeferredEntityBuilder::new(world, bump, current_entity);
+        for (mode, raw, hook) in &mut columns {
+            let mut comp_ptr = raw.data.pop().unwrap();
+            
+            // Apply hook if present
+            if let Some(h) = hook {
+                let ptr_mut = comp_ptr.get_ptr_mut();
+                h(ptr_mut, mapper);
+            }
+
+            match mode {
+                SnapshotMode::Full => {
+                    builder.insert_by_id(raw.comp_id, comp_ptr);
+                }
+                crate::prelude::SnapshotMode::EmplaceIfNotExists => {
+                    builder.insert_if_new_by_id(raw.comp_id, comp_ptr);
                 }
             }
         }

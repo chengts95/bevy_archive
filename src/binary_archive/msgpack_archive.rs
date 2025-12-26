@@ -41,6 +41,18 @@ impl Archive for MsgPackArchive {
         self.load_resources(world, registry).map_err(|e| e.into())
     }
 
+    fn get_entities(&self) -> Vec<u32> {
+        self.0.entities.to_vec()
+    }
+
+    fn load_resources(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.load_resources(world, registry).map_err(|e| e.into())
+    }
+
     fn save_to(
         &self,
         path: impl AsRef<Path>,

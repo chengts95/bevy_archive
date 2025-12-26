@@ -58,8 +58,22 @@ impl Archive for AuroraWorldManifest {
         id_registry: &IDRemapRegistry,
         mapper: &dyn EntityRemapper,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let snap: WorldArchSnapshot = (&self.world).into();
+        let snap: WorldArchSnapshot = self.into();
         load_world_arch_snapshot_with_remap(world, &snap, registry, id_registry, mapper);
+        load_world_resource(&self.world.resources, world, registry);
+        Ok(())
+    }
+
+    fn get_entities(&self) -> Vec<u32> {
+        let snap: WorldArchSnapshot = self.into();
+        snap.entities
+    }
+
+    fn load_resources(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         load_world_resource(&self.world.resources, world, registry);
         Ok(())
     }
@@ -489,6 +503,12 @@ impl From<&WorldArchSnapshot> for WorldWithAurora {
             name: None,
             resources: HashMap::new(),
         }
+    }
+}
+
+impl From<&AuroraWorldManifest> for WorldArchSnapshot {
+    fn from(manifest: &AuroraWorldManifest) -> Self {
+        (&manifest.world).into()
     }
 }
 
