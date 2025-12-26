@@ -1,4 +1,3 @@
-use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 #[derive(Debug, Deserialize)]
@@ -33,7 +32,8 @@ impl WorldSnapshot {
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
-use crate::{archetype_archive::WorldExt, bevy_registry::SnapshotRegistry};
+use crate::{archetype_archive::WorldExt, bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper}, traits::Archive};
+use bevy_ecs::prelude::*;
 
 /// JSON → TOML
 pub fn json_to_toml(json: &JsonValue) -> Result<TomlValue, String> {
@@ -44,6 +44,68 @@ pub fn json_to_toml(json: &JsonValue) -> Result<TomlValue, String> {
 pub fn toml_to_json(toml: &TomlValue) -> Result<JsonValue, String> {
     toml.serialize(serde_json::value::Serializer)
         .map_err(|e| format!("to_json failed: {}", e))
+}
+
+impl Archive for WorldSnapshot {
+    fn create(
+        world: &World,
+        registry: &SnapshotRegistry,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(save_world_snapshot(world, registry))
+    }
+
+    fn apply(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        load_world_snapshot(world, self, registry);
+        Ok(())
+    }
+
+    fn apply_with_remap(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+        id_registry: &IDRemapRegistry,
+        mapper: &dyn EntityRemapper,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        load_world_snapshot_with_remap(world, self, registry, id_registry, mapper);
+        Ok(())
+    }
+
+    fn save_to(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let path = path.as_ref();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ext == "toml" {
+             save_snapshot_to_file_toml(self, path).map_err(|e| e.into())
+        } else {
+             save_snapshot_to_file(self, path).map_err(|e| e.into())
+        }
+    }
+
+    fn load_from(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let path = path.as_ref();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+         if ext == "toml" {
+             load_snapshot_from_file_toml(path).map_err(|e| e.into())
+        } else {
+             load_snapshot_from_file(path).map_err(|e| e.into())
+        }
+    }
 }
 
 pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapshot {
@@ -82,6 +144,48 @@ pub fn load_world_snapshot(world: &mut World, snapshot: &WorldSnapshot, reg: &Sn
                 .map(|x| x.js_value.import)
                 .and_then(|f| Some(f(&c.value, world, entity).unwrap()))
                 .unwrap()
+        }
+    }
+}
+
+pub fn load_world_snapshot_with_remap(
+    world: &mut World,
+    snapshot: &WorldSnapshot,
+    reg: &SnapshotRegistry,
+    id_registry: &IDRemapRegistry,
+    mapper: &dyn EntityRemapper,
+) {
+    for e in &snapshot.entities {
+        let entity = mapper.map(e.id as u32);
+        if entity == Entity::PLACEHOLDER {
+            continue;
+        }
+
+        for c in &e.components {
+            let type_name = c.r#type.as_str();
+            if let Some(factory) = reg.get_factory(type_name) {
+                let import_fn = factory.js_value.import;
+                if let Err(err) = import_fn(&c.value, world, entity) {
+                    eprintln!("Error importing component {}: {}", type_name, err);
+                    continue;
+                }
+
+                // Apply Hook
+                if let Some(type_id) = reg.type_registry.get(type_name) {
+                     if let Some(hook) = id_registry.get_hook(*type_id) {
+                         if let Some(comp_id) = reg.comp_id_by_name(type_name, world) {
+                              // We need to get PtrMut to the component in the world.
+                              // SAFETY: We just inserted it, so it should exist.
+                              // Using world.get_mut_by_id gives us MutUntyped which can be converted to PtrMut?
+                              // world.get_mut_by_id returns Option<MutUntyped>. MutUntyped.into_inner() -> PtrMut.
+                              if let Some(mut mut_untyped) = world.get_mut_by_id(entity, comp_id) {
+                                  let ptr = mut_untyped.as_mut(); // This gives PtrMut
+                                  hook(ptr, mapper);
+                              }
+                         }
+                     }
+                }
+            }
         }
     }
 }

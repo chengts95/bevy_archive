@@ -2,13 +2,15 @@ use bevy_ecs::{
     component::{ComponentId, StorageType},
     entity::EntityRow,
     prelude::*,
+    ptr::PtrMut,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, vec};
 
 use crate::{
-    bevy_registry::SnapshotMode, bevy_registry::SnapshotRegistry, prelude::DeferredEntityBuilder,
+    bevy_registry::{IDRemapRegistry, EntityRemapper, SnapshotMode, SnapshotRegistry},
+    prelude::DeferredEntityBuilder,
 };
 
 use super::entity_archive::{self as archive, *};
@@ -24,6 +26,85 @@ impl WorldExt for World {
                 .entities_with_location()
                 .map(|(entity, _location)| entity)
         })
+    }
+}
+
+pub fn load_world_arch_snapshot_with_remap(
+    world: &mut World,
+    snapshot: &WorldArchSnapshot,
+    reg: &SnapshotRegistry,
+    id_reg: &IDRemapRegistry,
+    mapper: &dyn EntityRemapper,
+) {
+    for arch in &snapshot.archetypes {
+        let entities = arch.entities();
+
+        // Prepare component importers with hooks baked in
+        let arch_info: Vec<_> = arch
+            .component_types
+            .iter()
+            .enumerate()
+            .filter_map(|(col_idx, type_name)| {
+                let Some(factory) = reg.get_factory(&type_name) else {
+                    return None;
+                };
+                let id = reg
+                    .comp_id_by_name(type_name.as_str(), world)
+                    .or_else(|| Some(reg.reg_by_name(type_name, world)))?;
+                let mode = factory.mode;
+                let type_id = reg.type_registry.get(type_name.as_str()).cloned();
+                
+                let base_ctor = factory.js_value.dyn_ctor;
+                let hook = type_id.and_then(|tid| id_reg.get_hook(tid));
+                
+                // Create a wrapper closure
+                // We use an internal enum or direct invocation logic inside the loop, 
+                // but here we can just store the hook reference or clone it if needed.
+                // Since the loop below iterates entities, we want to avoid looking up the hook every entity.
+                // We'll store (col_idx, comp_id, mode, base_ctor, hook) tuple.
+                
+                Some((col_idx, id, mode, base_ctor, hook))
+            })
+            .collect();
+
+        let mut bump = bumpalo::Bump::new();
+        for (row, old_entity_id) in entities.iter().enumerate() {
+             let current_entity = mapper.map(*old_entity_id);
+             if current_entity == Entity::PLACEHOLDER {
+                panic!("Entity mapping failure: Old ID {} mapped to PLACEHOLDER", old_entity_id);
+             }
+
+            let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
+            for &(col_idx, comp_id, mode, ctor, hook) in arch_info.iter() {
+                let col = &arch.columns[col_idx];
+                
+                // Construct component
+                match ctor(&col[row], &bump) {
+                    Ok(mut comp_ptr) => {
+                         // Apply hook if present
+                        if let Some(h) = hook {
+                            let ptr_mut: PtrMut = comp_ptr.get_ptr_mut();
+                            h(ptr_mut, mapper);
+                        }
+
+                        match mode {
+                            SnapshotMode::Full => {
+                                builder.insert_by_id(comp_id, comp_ptr);
+                            }
+                            SnapshotMode::EmplaceIfNotExists => {
+                                builder.insert_if_new_by_id(comp_id, comp_ptr);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                         eprintln!("Error constructing component: {}", e);
+                    }
+                }
+            }
+
+            builder.commit();
+            bump.reset();
+        }
     }
 }
 

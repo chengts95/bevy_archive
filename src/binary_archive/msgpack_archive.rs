@@ -1,9 +1,10 @@
 use crate::archetype_archive::{
-    load_world_arch_snapshot_defragment, save_single_archetype_snapshot, ArchetypeSnapshot,
+    load_world_arch_snapshot_defragment, load_world_arch_snapshot_with_remap, save_single_archetype_snapshot, ArchetypeSnapshot,
     WorldArchSnapshot, WorldExt,
 };
-use crate::bevy_registry::SnapshotRegistry;
+use crate::bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper};
 use crate::binary_archive::common::{BinBlob, BinFormat, SparseU32List, WorldBinArchSnapshot};
+use crate::traits::Archive;
 use bevy_ecs::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
@@ -11,6 +12,48 @@ use std::io::{self};
 use std::path::Path;
 
 pub struct MsgPackArchive(pub WorldBinArchSnapshot);
+
+impl Archive for MsgPackArchive {
+    fn create(
+        world: &World,
+        registry: &SnapshotRegistry,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::from_world(world, registry).map_err(|e| e.into())
+    }
+
+    fn apply(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.to_world(world, registry).map_err(|e| e.into())
+    }
+
+    fn apply_with_remap(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+        id_registry: &IDRemapRegistry,
+        mapper: &dyn EntityRemapper,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let snap = self.decode_snapshot()?;
+        load_world_arch_snapshot_with_remap(world, &snap, registry, id_registry, mapper);
+        self.load_resources(world, registry).map_err(|e| e.into())
+    }
+
+    fn save_to(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.to_file(path).map_err(|e| e.into())
+    }
+
+    fn load_from(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::from_file(path).map_err(|e| e.into())
+    }
+}
 
 impl MsgPackArchive {
     /// Save the world to an in-memory MsgPackArchive
@@ -52,6 +95,39 @@ impl MsgPackArchive {
         }
 
         Ok(Self(snapshot))
+    }
+    
+    pub fn decode_snapshot(&self) -> Result<WorldArchSnapshot, io::Error> {
+         if self.0.format != BinFormat::MsgPack {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Expected MsgPack format, got {:?}", self.0.format),
+            ));
+        }
+
+        let mut world_arch_snap = WorldArchSnapshot::default();
+        world_arch_snap.entities = self.0.entities.to_vec();
+
+        for blob in &self.0.archetypes {
+            let arch_snap: ArchetypeSnapshot = rmp_serde::from_slice(&blob.0)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            world_arch_snap.archetypes.push(arch_snap);
+        }
+        
+        Ok(world_arch_snap)
+    }
+
+    pub fn load_resources(&self, world: &mut World, reg: &SnapshotRegistry) -> Result<(), io::Error> {
+         for (name, blob) in &self.0.resources {
+            if let Some(factory) = reg.get_res_factory(name) {
+                let value: serde_json::Value = rmp_serde::from_slice(&blob.0)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                
+                (factory.js_value.import)(&value, world, Entity::from_raw_u32(0).unwrap())
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            }
+        }
+        Ok(())
     }
 
     /// Load the archive into the world

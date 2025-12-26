@@ -19,19 +19,79 @@ use std::path::{Path, PathBuf};
 use crate::archetype_archive::{
     ArchetypeSnapshot, StorageTypeFlag, WorldArchSnapshot,
     load_world_arch_snapshot_defragment as load_world_arch_snapshot, load_world_resource,
-    save_world_arch_snapshot, save_world_resource,
+    save_world_arch_snapshot, save_world_resource, load_world_arch_snapshot_with_remap,
 };
 #[cfg(feature = "arrow_rs")]
 use crate::arrow_snapshot::ComponentTable;
-use crate::bevy_registry::SnapshotRegistry;
+use crate::bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper};
 use crate::csv_archive::ColumnarCsv;
 use crate::csv_archive::columnar_from_snapshot;
+use crate::traits::Archive;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuroraLocation {
     File(String),
     Embed(String),
     Unknown(String),
+}
+
+impl Archive for AuroraWorldManifest {
+    fn create(
+        world: &World,
+        registry: &SnapshotRegistry,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        save_world_manifest(world, registry).map_err(|e| e.into())
+    }
+
+    fn apply(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        load_world_manifest(world, self, registry).map_err(|e| e.into())
+    }
+
+    fn apply_with_remap(
+        &self,
+        world: &mut World,
+        registry: &SnapshotRegistry,
+        id_registry: &IDRemapRegistry,
+        mapper: &dyn EntityRemapper,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let snap: WorldArchSnapshot = (&self.world).into();
+        load_world_arch_snapshot_with_remap(world, &snap, registry, id_registry, mapper);
+        load_world_resource(&self.world.resources, world, registry);
+        Ok(())
+    }
+
+    fn save_to(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let p = path.as_ref().to_str().ok_or("Invalid path")?;
+        
+        let ext = path
+            .as_ref()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+            
+        let format = match ext.as_str() {
+            "json" => Some(ManifestOutputFormat::Json),
+            "toml" => Some(ManifestOutputFormat::Toml),
+            _ => None,
+        };
+
+        self.to_file(p, format).map_err(|e| e.into())
+    }
+
+    fn load_from(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let p = path.as_ref().to_str().ok_or("Invalid path")?;
+        Self::from_file(p, None).map_err(|e| e.into())
+    }
 }
 
 impl From<&str> for AuroraLocation {

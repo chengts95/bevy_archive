@@ -6,6 +6,8 @@ pub mod csv_archive;
 pub mod entity_archive;
 
 pub mod binary_archive;
+pub mod serde_utils;
+pub mod traits;
 
 #[cfg(feature = "flecs")]
 pub mod flecs_archsnaphot;
@@ -25,4 +27,6 @@ pub mod prelude {
     pub use crate::flecs_registry;
 
     pub use crate::entity_archive::*;
+    pub use crate::serde_utils::*;
+    pub use crate::traits::*;
 }

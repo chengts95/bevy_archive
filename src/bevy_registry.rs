@@ -35,12 +35,52 @@ impl<'a> ArenaBox<'a> {
     pub fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
     }
+    pub fn get_ptr_mut(&mut self) -> PtrMut<'a> {
+        // SAFETY: We have &mut self, so we have exclusive access to the owning ptr and its data.
+        unsafe { PtrMut::new(NonNull::new_unchecked(self.ptr.as_ptr() as *mut u8)) }
+    }
 }
-pub struct ComponentFactory {
-    pub remap_ids: Option<Box<dyn Fn(&mut PtrMut, &dyn EntityRemapper)>>,
+
+pub struct IDRemapRegistry {
+    pub hooks: HashMap<TypeId, Box<dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync>>,
 }
+
+impl Default for IDRemapRegistry {
+    fn default() -> Self {
+        Self {
+            hooks: HashMap::new(),
+        }
+    }
+}
+
+impl IDRemapRegistry {
+    pub fn register_remap_hook<T: Component>(
+        &mut self,
+        hook: impl Fn(&mut T, &dyn EntityRemapper) + 'static + Send + Sync,
+    ) {
+        self.hooks.insert(
+            TypeId::of::<T>(),
+            Box::new(move |ptr, mapper| {
+                // ptr is PtrMut
+                let val = unsafe { ptr.deref_mut::<T>() };
+                hook(val, mapper);
+            }),
+        );
+    }
+    
+    pub fn get_hook(&self, type_id: TypeId) -> Option<&(dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync)> {
+        self.hooks.get(&type_id).map(|b| b.as_ref())
+    }
+}
+
 pub trait EntityRemapper {
     fn map(&self, old_id: u32) -> Entity;
+}
+
+impl EntityRemapper for HashMap<u32, Entity> {
+    fn map(&self, old_id: u32) -> Entity {
+        *self.get(&old_id).unwrap_or(&Entity::PLACEHOLDER)
+    }
 }
 
 pub struct DeferredEntityBuilder<'w, 'a> {
