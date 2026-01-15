@@ -6,6 +6,7 @@ pub mod csv_archive;
 pub mod entity_archive;
 
 pub mod binary_archive;
+pub mod bevy_cmdbuffer;
 pub mod serde_utils;
 pub mod traits;
 

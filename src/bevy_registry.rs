@@ -17,8 +17,8 @@ use crate::prelude::codec::JsonValueCodec;
 //it allows to have a type erased box that can drop the inner type correctly
 //it must be dropped manually or it will leak memory.
 pub struct ArenaBox<'a> {
-    ptr: OwningPtr<'a, Aligned>,
-    drop_fn: unsafe fn(OwningPtr<'a, Aligned>),
+    pub ptr: OwningPtr<'a, Aligned>,
+    pub drop_fn: unsafe fn(OwningPtr<'a, Aligned>),
 }
 impl<'a> ArenaBox<'a> {
     pub fn new<T>(ptr: OwningPtr<'a, Aligned>) -> Self {
