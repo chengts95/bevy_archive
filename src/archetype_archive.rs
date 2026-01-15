@@ -89,11 +89,11 @@ pub fn load_world_arch_snapshot_with_remap(
 
                         match mode {
                             SnapshotMode::Full => {
-                                buffer.insert(current_entity, comp_id, comp_ptr);
+                                buffer.insert_box(current_entity, comp_id, comp_ptr);
                             }
                             SnapshotMode::EmplaceIfNotExists => {
                                 if !world.entity(current_entity).contains_id(comp_id) {
-                                     buffer.insert(current_entity, comp_id, comp_ptr);
+                                     buffer.insert_box(current_entity, comp_id, comp_ptr);
                                 } else {
                                     comp_ptr.manual_drop();
                                 }
@@ -416,12 +416,12 @@ pub fn load_world_arch_snapshot_defragment(
                 let (id, comp_ptr) = (comp_id, ctor(&col[row], unsafe { &*bump_ptr }).unwrap());
                 match mode {
                     SnapshotMode::Full => {
-                        buffer.insert(current_entity, id, comp_ptr);
+                        buffer.insert_box(current_entity, id, comp_ptr);
                     }
 
                     SnapshotMode::EmplaceIfNotExists => {
                          if !world.entity(current_entity).contains_id(id) {
-                            buffer.insert(current_entity, id, comp_ptr);
+                            buffer.insert_box(current_entity, id, comp_ptr);
                         } else {
                             comp_ptr.manual_drop();
                         }

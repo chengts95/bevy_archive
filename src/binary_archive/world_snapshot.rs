@@ -298,11 +298,11 @@ pub fn load_arrow_archetype_to_world(
             let ptr = raw.data.pop().unwrap();
             match mode {
                 SnapshotMode::Full => {
-                    buffer.insert(entity, raw.comp_id, ptr);
+                    buffer.insert_box(entity, raw.comp_id, ptr);
                 }
                 crate::prelude::SnapshotMode::EmplaceIfNotExists => {
                      if !world.entity(entity).contains_id(raw.comp_id) {
-                        buffer.insert(entity, raw.comp_id, ptr);
+                        buffer.insert_box(entity, raw.comp_id, ptr);
                     } else {
                         ptr.manual_drop();
                     }
@@ -363,11 +363,11 @@ pub fn load_arrow_archetype_with_remap(
 
             match mode {
                 SnapshotMode::Full => {
-                     buffer.insert(current_entity, raw.comp_id, comp_ptr);
+                     buffer.insert_box(current_entity, raw.comp_id, comp_ptr);
                 }
                 crate::prelude::SnapshotMode::EmplaceIfNotExists => {
                     if !world.entity(current_entity).contains_id(raw.comp_id) {
-                         buffer.insert(current_entity, raw.comp_id, comp_ptr);
+                         buffer.insert_box(current_entity, raw.comp_id, comp_ptr);
                     } else {
                         comp_ptr.manual_drop();
                     }

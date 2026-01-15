@@ -107,7 +107,7 @@ impl<'w> DeferredEntityBuilder<'w> {
     }
     
     pub fn insert_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'_>) {
-        self.buffer.insert(self.entity, id, ptr);
+        self.buffer.insert_box(self.entity, id, ptr);
     }
     
     pub fn insert_if_new_by_id(&mut self, world: &World, id: ComponentId, ptr: ArenaBox<'_>) {

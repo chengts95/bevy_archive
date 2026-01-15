@@ -59,7 +59,7 @@ fn insert_comp<T: Component>(world: &mut World, buffer: &mut HarvardCommandBuffe
     let bump_ptr = buffer.data_bump() as *const Bump;
     let ptr = unsafe { (*bump_ptr).alloc(val) as *mut T };
     let abox = unsafe { ArenaBox::new::<T>(OwningPtr::new(NonNull::new_unchecked(ptr.cast()))) };
-    buffer.insert(entity, comp_id, abox);
+    buffer.insert_box(entity, comp_id, abox);
 }
 
 // rustfmt::skip
