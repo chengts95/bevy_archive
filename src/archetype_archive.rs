@@ -10,7 +10,7 @@ use std::{collections::HashMap, vec};
 
 use crate::{
     bevy_registry::{IDRemapRegistry, EntityRemapper, SnapshotMode, SnapshotRegistry},
-    prelude::DeferredEntityBuilder,
+    bevy_cmdbuffer::HarvardCommandBuffer,
 };
 
 use super::entity_archive::{self as archive, *};
@@ -67,19 +67,19 @@ pub fn load_world_arch_snapshot_with_remap(
             })
             .collect();
 
-        let mut bump = bumpalo::Bump::new();
+        let mut buffer = HarvardCommandBuffer::new();
+        let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
         for (row, old_entity_id) in entities.iter().enumerate() {
              let current_entity = mapper.map(*old_entity_id);
              if current_entity == Entity::PLACEHOLDER {
                 panic!("Entity mapping failure: Old ID {} mapped to PLACEHOLDER", old_entity_id);
              }
 
-            let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
             for &(col_idx, comp_id, mode, ctor, hook) in arch_info.iter() {
                 let col = &arch.columns[col_idx];
                 
                 // Construct component
-                match ctor(&col[row], &bump) {
+                match ctor(&col[row], unsafe { &*bump_ptr }) {
                     Ok(mut comp_ptr) => {
                          // Apply hook if present
                         if let Some(h) = hook {
@@ -89,10 +89,14 @@ pub fn load_world_arch_snapshot_with_remap(
 
                         match mode {
                             SnapshotMode::Full => {
-                                builder.insert_by_id(comp_id, comp_ptr);
+                                buffer.insert(current_entity, comp_id, comp_ptr);
                             }
                             SnapshotMode::EmplaceIfNotExists => {
-                                builder.insert_if_new_by_id(comp_id, comp_ptr);
+                                if !world.entity(current_entity).contains_id(comp_id) {
+                                     buffer.insert(current_entity, comp_id, comp_ptr);
+                                } else {
+                                    comp_ptr.manual_drop();
+                                }
                             }
                         }
                     },
@@ -101,10 +105,8 @@ pub fn load_world_arch_snapshot_with_remap(
                     }
                 }
             }
-
-            builder.commit();
-            bump.reset();
         }
+        buffer.apply(world);
     }
 }
 
@@ -402,29 +404,31 @@ pub fn load_world_arch_snapshot_defragment(
             })
             .collect();
 
-        let mut bump = bumpalo::Bump::new();
+        let mut buffer = HarvardCommandBuffer::new();
+        let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
         for (row, entity) in entities.iter().enumerate() {
             let entity = EntityRow::from_raw_u32(*entity).unwrap();
             let current_entity = world.entities().resolve_from_id(entity).unwrap();
 
-            let mut builder = DeferredEntityBuilder::new(world, &bump, current_entity);
             for &(col_idx, ctor, comp_id, mode) in arch_info.iter() {
                 let col = &arch.columns[col_idx];
-                let (id, comp_ptr) = (comp_id, ctor(&col[row], &bump).unwrap());
+                let (id, comp_ptr) = (comp_id, ctor(&col[row], unsafe { &*bump_ptr }).unwrap());
                 match mode {
                     SnapshotMode::Full => {
-                        builder.insert_by_id(id, comp_ptr);
+                        buffer.insert(current_entity, id, comp_ptr);
                     }
 
                     SnapshotMode::EmplaceIfNotExists => {
-                        builder.insert_if_new_by_id(id, comp_ptr);
+                         if !world.entity(current_entity).contains_id(id) {
+                            buffer.insert(current_entity, id, comp_ptr);
+                        } else {
+                            comp_ptr.manual_drop();
+                        }
                     }
                 }
             }
-
-            builder.commit();
-            bump.reset();
         }
+        buffer.apply(world);
     }
 }
 

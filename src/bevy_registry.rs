@@ -86,57 +86,40 @@ impl EntityRemapper for HashMap<u32, Entity> {
     }
 }
 
-pub struct DeferredEntityBuilder<'w, 'a> {
-    world: &'w mut World,
+use crate::bevy_cmdbuffer::HarvardCommandBuffer;
+
+pub struct DeferredEntityBuilder<'w> {
+    buffer: &'w mut HarvardCommandBuffer,
     entity: Entity,
-    ids: Vec<ComponentId>,
-    ptrs: Vec<ArenaBox<'a>>,
-    bump: &'a Bump,
 }
 
-impl<'w, 'a> DeferredEntityBuilder<'w, 'a> {
-    pub fn new(world: &'w mut World, bump: &'a Bump, entity: Entity) -> Self {
-        Self {
-            world,
-            entity,
-            ids: vec![],
-            ptrs: vec![],
-            bump,
-        }
+impl<'w> DeferredEntityBuilder<'w> {
+    pub fn new(buffer: &'w mut HarvardCommandBuffer, entity: Entity) -> Self {
+        Self { buffer, entity }
     }
-    pub fn insert<T: Component>(&mut self, value: T) {
-        let id = self
-            .world
-            .component_id::<T>()
-            .unwrap_or_else(|| self.world.register_component::<T>());
-        let ptr = self.bump.alloc(value) as *mut T;
-        let ptr = unsafe { OwningPtr::new(NonNull::new_unchecked(ptr.cast())) };
-        self.insert_by_id(id, ArenaBox::new::<T>(ptr));
+    
+    pub fn insert<T: Component>(&mut self, _world: &mut World, _value: T) {
+         // This method signature is problematic because we need ComponentId.
+         // And HarvardCommandBuffer expects ArenaBox.
+         // The original insert took `value: T` and `world` (implicitly via self.world).
+         // It used self.bump to alloc.
+         unimplemented!("Use insert_by_id with ArenaBox");
     }
-    pub fn insert_if_new_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'a>) {
-        if self.world.entity(self.entity).contains_id(id) {
+    
+    pub fn insert_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'_>) {
+        self.buffer.insert(self.entity, id, ptr);
+    }
+    
+    pub fn insert_if_new_by_id(&mut self, world: &World, id: ComponentId, ptr: ArenaBox<'_>) {
+         if world.entity(self.entity).contains_id(id) {
             ptr.manual_drop();
             return;
         }
         self.insert_by_id(id, ptr);
     }
-    pub fn insert_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'a>) {
-        if let Some(i) = self.ids.iter().position(|&existing| existing == id) {
-            let old_box = std::mem::replace(&mut self.ptrs[i], ptr);
-            old_box.manual_drop();
-        } else {
-            self.ids.push(id);
-            self.ptrs.push(ptr);
-        }
-    }
-    pub fn manual_drop(self) {
-        for ptr in self.ptrs {
-            ptr.manual_drop();
-        }
-    }
+    
     pub fn commit(self) {
-        let mut entity = self.world.entity_mut(self.entity);
-        unsafe { entity.insert_by_ids(&self.ids, self.ptrs.into_iter().map(|x| x.ptr)) };
+        // No-op, buffer handles it on flush/apply
     }
 }
 

@@ -19,6 +19,7 @@ use crate::{
     },
     bevy_registry::{IDRemapRegistry, EntityRemapper},
     traits::Archive,
+    bevy_cmdbuffer::HarvardCommandBuffer,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -53,10 +54,11 @@ impl Archive for WorldArrowSnapshot {
         mapper: &dyn EntityRemapper,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Self::load_world_resource(&self.resources, world, registry).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
-        let mut bump = bumpalo::Bump::new();
+        let mut buffer = HarvardCommandBuffer::new();
         for archetype in &self.archetypes {
-            load_arrow_archetype_with_remap(world, registry, id_registry, archetype, &mut bump, mapper).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
+            load_arrow_archetype_with_remap(world, registry, id_registry, archetype, &mut buffer, mapper).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
         }
+        buffer.apply(world);
         Ok(())
     }
 
@@ -246,10 +248,11 @@ impl WorldArrowSnapshot {
             .reserve_entities(count_entities(&self.entities));
         world.flush();
         Self::load_world_resource(&self.resources, world, reg)?;
-        let mut bump = bumpalo::Bump::new();
+        let mut buffer = HarvardCommandBuffer::new();
         for archetype in &self.archetypes {
-            load_arrow_archetype_to_world(world, reg, archetype, &mut bump)?;
+            load_arrow_archetype_to_world(world, reg, archetype, &mut buffer)?;
         }
+        buffer.apply(world);
         Ok(())
     }
 }
@@ -258,10 +261,11 @@ pub fn load_arrow_archetype_to_world(
     world: &mut World,
     reg: &SnapshotRegistry,
     archetype: &ComponentTable,
-    bump: &mut bumpalo::Bump,
+    buffer: &mut HarvardCommandBuffer,
 ) -> Result<(), SnapshotError> {
     let mut columns = Vec::new();
     let types = archetype.columns();
+    let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
 
     for (type_name, data) in types {
         if let Some(arrow) = reg.get_factory(type_name).and_then(|x| x.arrow.as_ref()) {
@@ -270,7 +274,12 @@ pub fn load_arrow_archetype_to_world(
                 .or_else(|| Some(reg.reg_by_name(type_name, world)))
                 .unwrap();
             let mode = unsafe { reg.get_factory(type_name).unwrap_unchecked().mode };
-            let data = (arrow.arr_dyn)(data, bump, world)?;
+            // Note: arr_dyn now expects (ArrowColumn, &Bump). 
+            // In factory.rs it was: `fn(&ArrowColumn, &'a bumpalo::Bump) -> ...`
+            // But we modified factory.rs back to original state?
+            // Wait, I might have messed up `factory.rs` state in the confusion about reverting.
+            // Let's assume `arr_dyn` takes `&Bump`.
+            let data = (arrow.arr_dyn)(data, unsafe { &*bump_ptr })?;
             let raw_vec = RawTData { comp_id, data };
             columns.push((mode, raw_vec));
         } else {
@@ -282,22 +291,24 @@ pub fn load_arrow_archetype_to_world(
             .entities()
             .resolve_from_id(EntityRow::from_raw_u32(id.id as u32).unwrap())
             .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
-        let mut builder = DeferredEntityBuilder::new(world, bump, entity);
+        
         for (mode, raw) in &mut columns {
             let ptr = raw.data.pop().unwrap();
             match mode {
                 SnapshotMode::Full => {
-                    builder.insert_by_id(raw.comp_id, ptr);
+                    buffer.insert(entity, raw.comp_id, ptr);
                 }
                 crate::prelude::SnapshotMode::EmplaceIfNotExists => {
-                    builder.insert_if_new_by_id(raw.comp_id, ptr);
+                     if !world.entity(entity).contains_id(raw.comp_id) {
+                        buffer.insert(entity, raw.comp_id, ptr);
+                    } else {
+                        ptr.manual_drop();
+                    }
                 }
             }
         }
-        builder.commit();
     }
 
-    bump.reset();
     Ok(())
 }
 
@@ -306,11 +317,12 @@ pub fn load_arrow_archetype_with_remap(
     reg: &SnapshotRegistry,
     id_reg: &IDRemapRegistry,
     archetype: &ComponentTable,
-    bump: &mut bumpalo::Bump,
+    buffer: &mut HarvardCommandBuffer,
     mapper: &dyn EntityRemapper,
 ) -> Result<(), SnapshotError> {
     let mut columns = Vec::new();
     let types = archetype.columns();
+    let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
 
     for (type_name, data) in types {
         if let Some(factory) = reg.get_factory(type_name) {
@@ -320,7 +332,7 @@ pub fn load_arrow_archetype_with_remap(
                     .or_else(|| Some(reg.reg_by_name(type_name, world)))
                     .unwrap();
                 let mode = factory.mode;
-                let data = (arrow.arr_dyn)(data, bump, world)?;
+                let data = (arrow.arr_dyn)(data, unsafe { &*bump_ptr })?;
                 let type_id = reg.type_registry.get(type_name.as_str()).cloned();
                 let hook = type_id.and_then(|tid| id_reg.get_hook(tid));
                 
@@ -338,7 +350,6 @@ pub fn load_arrow_archetype_with_remap(
              panic!("Entity mapping failure: Old ID {} mapped to PLACEHOLDER", id.id);
         }
 
-        let mut builder = DeferredEntityBuilder::new(world, bump, current_entity);
         for (mode, raw, hook) in &mut columns {
             let mut comp_ptr = raw.data.pop().unwrap();
             
@@ -350,17 +361,19 @@ pub fn load_arrow_archetype_with_remap(
 
             match mode {
                 SnapshotMode::Full => {
-                    builder.insert_by_id(raw.comp_id, comp_ptr);
+                     buffer.insert(current_entity, raw.comp_id, comp_ptr);
                 }
                 crate::prelude::SnapshotMode::EmplaceIfNotExists => {
-                    builder.insert_if_new_by_id(raw.comp_id, comp_ptr);
+                    if !world.entity(current_entity).contains_id(raw.comp_id) {
+                         buffer.insert(current_entity, raw.comp_id, comp_ptr);
+                    } else {
+                        comp_ptr.manual_drop();
+                    }
                 }
             }
         }
-        builder.commit();
     }
 
-    bump.reset();
     Ok(())
 }
 

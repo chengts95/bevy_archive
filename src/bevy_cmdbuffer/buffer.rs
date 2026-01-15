@@ -95,14 +95,44 @@ impl HarvardCommandBuffer {
     fn flush(&mut self) {
         if let Some(entity) = self.pending_entity.take() {
             if !self.pending_args.is_empty() {
-                let slice = self.meta_bump.alloc_slice_copy(&self.pending_args);
-                let count = slice.len() as u16;
-                let args_ptr = unsafe { NonNull::new_unchecked(slice.as_mut_ptr()) };
-                self.ops.push(OpHead::ModifyEntity {
-                    entity,
-                    args_ptr,
-                    count,
-                });
+                // Deduplicate pending_args to support "Write Combining" where a later insert overwrites an earlier one.
+                // We must drop the payloads of the overwritten components.
+                let mut i = 0;
+                while i < self.pending_args.len() {
+                    let id = self.pending_args[i].comp_id;
+                    let mut overwritten = false;
+                    // Check if this ID appears later in the list
+                    for j in (i + 1)..self.pending_args.len() {
+                        if self.pending_args[j].comp_id == id {
+                            overwritten = true;
+                            break;
+                        }
+                    }
+
+                    if overwritten {
+                        // This arg is overwritten by a later one. Drop its payload.
+                        if let Some(drop_fn) = self.pending_args[i].drop_fn {
+                            let ptr = unsafe { OwningPtr::new(self.pending_args[i].payload_ptr) };
+                            unsafe { drop_fn(ptr) };
+                        }
+                        // Remove from list. swap_remove is efficient and order doesn't strictly matter for insert_by_ids.
+                        self.pending_args.swap_remove(i);
+                        // Do not increment i, as we swapped in a new element to check.
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                if !self.pending_args.is_empty() {
+                    let slice = self.meta_bump.alloc_slice_copy(&self.pending_args);
+                    let count = slice.len() as u16;
+                    let args_ptr = unsafe { NonNull::new_unchecked(slice.as_mut_ptr()) };
+                    self.ops.push(OpHead::ModifyEntity {
+                        entity,
+                        args_ptr,
+                        count,
+                    });
+                }
                 self.pending_args.clear();
             }
         }

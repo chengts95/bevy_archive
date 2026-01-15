@@ -4,8 +4,12 @@
 use bevy_archive::{
     archetype_archive::{WorldArchSnapshot, load_world_arch_snapshot},
     prelude::*,
+    bevy_cmdbuffer::HarvardCommandBuffer,
 };
 use bevy_ecs::prelude::*;
+use bevy_ecs::ptr::OwningPtr;
+use bevy_ecs::component::ComponentId;
+use std::ptr::NonNull;
 use bumpalo::Bump;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -48,31 +52,54 @@ macro_rules! fixed_archetypes {
         list
     }};
 }
+
+fn insert_comp<T: Component>(world: &mut World, buffer: &mut HarvardCommandBuffer, entity: Entity, val: T) {
+    let comp_id = world.component_id::<T>().unwrap_or_else(|| world.register_component::<T>());
+    // Unsafe fix for simultaneous borrow:
+    let bump_ptr = buffer.data_bump() as *const Bump;
+    let ptr = unsafe { (*bump_ptr).alloc(val) as *mut T };
+    let abox = unsafe { ArenaBox::new::<T>(OwningPtr::new(NonNull::new_unchecked(ptr.cast()))) };
+    buffer.insert(entity, comp_id, abox);
+}
+
 // rustfmt::skip
 fn build_with_deferred(world: &mut World) {
-    let bump = Bump::new();
+    let mut buffer = HarvardCommandBuffer::new();
     let archetypes = fixed_archetypes!(10);
+    
+    // Register components first to get stable IDs (optional but good practice)
+    world.register_component::<TestComp1>();
+    world.register_component::<TestComp2>();
+    world.register_component::<TestComp3>();
+    world.register_component::<TestComp4>();
+    world.register_component::<TestComp5>();
+    world.register_component::<TestComp6>();
+    world.register_component::<TestComp7>();
+    world.register_component::<TestComp8>();
+    world.register_component::<TestComp9>();
+    world.register_component::<TestComp10>();
+
     for i in 0..100 {
         let types = &archetypes[i % 14];
         let entity = world.spawn_empty().id();
-        let mut builder = DeferredEntityBuilder::new(world, &bump, entity);
+        
         for &ty in types {
             match ty {
-                0 => builder.insert(TestComp1(i)),
-                1 => builder.insert(TestComp2(i)),
-                2 => builder.insert(TestComp3(i)),
-                3 => builder.insert(TestComp4(i)),
-                4 => builder.insert(TestComp5(i)),
-                5 => builder.insert(TestComp6(i)),
-                6 => builder.insert(TestComp7(i)),
-                7 => builder.insert(TestComp8(i)),
-                8 => builder.insert(TestComp9(i)),
-                9 => builder.insert(TestComp10(i)),
+                0 => insert_comp(world, &mut buffer, entity, TestComp1(i)),
+                1 => insert_comp(world, &mut buffer, entity, TestComp2(i)),
+                2 => insert_comp(world, &mut buffer, entity, TestComp3(i)),
+                3 => insert_comp(world, &mut buffer, entity, TestComp4(i)),
+                4 => insert_comp(world, &mut buffer, entity, TestComp5(i)),
+                5 => insert_comp(world, &mut buffer, entity, TestComp6(i)),
+                6 => insert_comp(world, &mut buffer, entity, TestComp7(i)),
+                7 => insert_comp(world, &mut buffer, entity, TestComp8(i)),
+                8 => insert_comp(world, &mut buffer, entity, TestComp9(i)),
+                9 => insert_comp(world, &mut buffer, entity, TestComp10(i)),
                 _ => unreachable!(),
             }
         }
-        builder.commit();
     }
+    buffer.apply(world);
 }
 // rustfmt::skip
 fn build_with_commands(world: &mut World) {
