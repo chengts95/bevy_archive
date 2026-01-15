@@ -11,6 +11,7 @@ use std::{collections::HashMap, vec};
 use crate::{
     bevy_registry::{IDRemapRegistry, EntityRemapper, SnapshotMode, SnapshotRegistry},
     bevy_cmdbuffer::HarvardCommandBuffer,
+    prelude::codec::DynBuilderFn,
 };
 
 use super::entity_archive::{self as archive, *};
@@ -29,6 +30,45 @@ impl WorldExt for World {
     }
 }
 
+struct ComponentLoaderInfo<'a> {
+    col_idx: usize,
+    comp_id: ComponentId,
+    mode: SnapshotMode,
+    ctor: DynBuilderFn,
+    hook: Option<&'a (dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync)>,
+}
+
+fn prepare_loader_info<'a>(
+    world: &mut World,
+    reg: &SnapshotRegistry,
+    id_reg: Option<&'a IDRemapRegistry>,
+    arch: &ArchetypeSnapshot,
+) -> Vec<ComponentLoaderInfo<'a>> {
+    arch.component_types
+        .iter()
+        .enumerate()
+        .filter_map(|(col_idx, type_name)| {
+            let factory = reg.get_factory(type_name)?;
+            let comp_id = reg.comp_id_by_name(type_name.as_str(), world)
+                .or_else(|| Some(reg.reg_by_name(type_name, world)))?; 
+            
+            let mode = factory.mode;
+            let type_id = reg.type_registry.get(type_name.as_str()).cloned();
+            let ctor = factory.js_value.dyn_ctor;
+            
+            let hook = id_reg.and_then(|r| type_id.and_then(|tid| r.get_hook(tid)));
+
+            Some(ComponentLoaderInfo {
+                col_idx,
+                comp_id,
+                mode,
+                ctor,
+                hook,
+            })
+        })
+        .collect()
+}
+
 pub fn load_world_arch_snapshot_with_remap(
     world: &mut World,
     snapshot: &WorldArchSnapshot,
@@ -39,61 +79,32 @@ pub fn load_world_arch_snapshot_with_remap(
     let mut buffer = HarvardCommandBuffer::new();
     for arch in &snapshot.archetypes {
         let entities = arch.entities();
-
-        // Prepare component importers with hooks baked in
-        let arch_info: Vec<_> = arch
-            .component_types
-            .iter()
-            .enumerate()
-            .filter_map(|(col_idx, type_name)| {
-                let Some(factory) = reg.get_factory(&type_name) else {
-                    return None;
-                };
-                let id = reg
-                    .comp_id_by_name(type_name.as_str(), world)
-                    .or_else(|| Some(reg.reg_by_name(type_name, world)))?;
-                let mode = factory.mode;
-                let type_id = reg.type_registry.get(type_name.as_str()).cloned();
-                
-                let base_ctor = factory.js_value.dyn_ctor;
-                let hook = type_id.and_then(|tid| id_reg.get_hook(tid));
-                
-                // Create a wrapper closure
-                // We use an internal enum or direct invocation logic inside the loop, 
-                // but here we can just store the hook reference or clone it if needed.
-                // Since the loop below iterates entities, we want to avoid looking up the hook every entity.
-                // We'll store (col_idx, comp_id, mode, base_ctor, hook) tuple.
-                
-                Some((col_idx, id, mode, base_ctor, hook))
-            })
-            .collect();
-
+        let arch_info = prepare_loader_info(world, reg, Some(id_reg), arch);
         let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
+        
         for (row, old_entity_id) in entities.iter().enumerate() {
              let current_entity = mapper.map(*old_entity_id);
              if current_entity == Entity::PLACEHOLDER {
                 panic!("Entity mapping failure: Old ID {} mapped to PLACEHOLDER", old_entity_id);
              }
 
-            for &(col_idx, comp_id, mode, ctor, hook) in arch_info.iter() {
-                let col = &arch.columns[col_idx];
+            for info in &arch_info {
+                let col = &arch.columns[info.col_idx];
                 
-                // Construct component
-                match ctor(&col[row], unsafe { &*bump_ptr }) {
+                match (info.ctor)(&col[row], unsafe { &*bump_ptr }) {
                     Ok(mut comp_ptr) => {
-                         // Apply hook if present
-                        if let Some(h) = hook {
+                        if let Some(h) = info.hook {
                             let ptr_mut: PtrMut = comp_ptr.get_ptr_mut();
                             h(ptr_mut, mapper);
                         }
 
-                        match mode {
+                        match info.mode {
                             SnapshotMode::Full => {
-                                buffer.insert_box(current_entity, comp_id, comp_ptr);
+                                buffer.insert_box(current_entity, info.comp_id, comp_ptr);
                             }
                             SnapshotMode::EmplaceIfNotExists => {
-                                if !world.entity(current_entity).contains_id(comp_id) {
-                                     buffer.insert_box(current_entity, comp_id, comp_ptr);
+                                if !world.entity(current_entity).contains_id(info.comp_id) {
+                                     buffer.insert_box(current_entity, info.comp_id, comp_ptr);
                                 } else {
                                     comp_ptr.manual_drop();
                                 }
@@ -344,36 +355,39 @@ pub fn load_world_arch_snapshot(
     world.entities().reserve_entities(count_entities(snapshot));
     world.flush();
 
+    let mut buffer = HarvardCommandBuffer::new();
     for arch in &snapshot.archetypes {
         let entities = arch.entities();
-        for type_name in arch.component_types.iter() {
-            // meta info is not strict constraint for loading
-            // let storage_type = match arch.storage_types[i] {
-            //     StorageTypeFlag::Table => StorageType::Table,
-            //     StorageTypeFlag::SparseSet => StorageType::SparseSet,
-            // };
-            let col = arch.get_column(&type_name).unwrap();
-            let un = entities.iter().zip(col.iter());
-            for (entity_id, value) in un {
-                let entity = Entity::from_row(EntityRow::from_raw_u32(*entity_id as u32).unwrap());
-                match reg.get_factory(&type_name).map(|x| x.js_value.import) {
-                    Some(func) => {
-                        if let Err(e) = func(value, world, entity) {
-                            eprintln!(
-                                "[ImportError] type='{}', entity={:?}, error={}",
-                                type_name, entity, e
-                            );
-                        }
+        let arch_info = prepare_loader_info(world, reg, None, arch);
+        let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
+
+        for (row, entity_id) in entities.iter().enumerate() {
+            let entity = Entity::from_row(EntityRow::from_raw_u32(*entity_id).unwrap());
+            
+            for info in &arch_info {
+                let col = &arch.columns[info.col_idx];
+                let (id, mut comp_ptr) = (info.comp_id, (info.ctor)(&col[row], unsafe { &*bump_ptr }).unwrap());
+                
+                // load_world_arch_snapshot implies simple load, but we should respect mode?
+                // The old implementation just called 'import'.
+                // 'import' usually inserts.
+                // We'll use SnapshotMode from factory.
+                match info.mode {
+                    SnapshotMode::Full => {
+                        buffer.insert_box(entity, id, comp_ptr);
                     }
-                    None => {
-                        // eprintln!(
-                        //     "[MissingImporter] type='{}', entity={:?}",
-                        //     type_name, entity
-                        // );
+                    SnapshotMode::EmplaceIfNotExists => {
+                        if !world.entity(entity).contains_id(id) {
+                            buffer.insert_box(entity, id, comp_ptr);
+                        } else {
+                            comp_ptr.manual_drop();
+                        }
                     }
                 }
             }
         }
+        buffer.apply(world);
+        buffer.reset();
     }
 }
 
@@ -388,33 +402,17 @@ pub fn load_world_arch_snapshot_defragment(
     let mut buffer = HarvardCommandBuffer::new();
     for arch in &snapshot.archetypes {
         let entities = arch.entities();
-
-        let arch_info: Vec<_> = arch
-            .component_types
-            .iter()
-            .enumerate()
-            .filter_map(|(col_idx, type_name)| {
-                let Some(factory) = reg.get_factory(&type_name) else {
-                    //we can emit warnings here
-                    return None;
-                };
-                let id = reg
-                    .comp_id_by_name(type_name.as_str(), world)
-                    .or_else(|| Some(reg.reg_by_name(type_name, world)))?;
-                let mode = factory.mode;
-                Some((col_idx, factory.js_value.dyn_ctor, id, mode))
-            })
-            .collect();
-
+        let arch_info = prepare_loader_info(world, reg, None, arch);
         let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
+        
         for (row, entity) in entities.iter().enumerate() {
             let entity = EntityRow::from_raw_u32(*entity).unwrap();
             let current_entity = world.entities().resolve_from_id(entity).unwrap();
 
-            for &(col_idx, ctor, comp_id, mode) in arch_info.iter() {
-                let col = &arch.columns[col_idx];
-                let (id, comp_ptr) = (comp_id, ctor(&col[row], unsafe { &*bump_ptr }).unwrap());
-                match mode {
+            for info in &arch_info {
+                let col = &arch.columns[info.col_idx];
+                let (id, mut comp_ptr) = (info.comp_id, (info.ctor)(&col[row], unsafe { &*bump_ptr }).unwrap());
+                match info.mode {
                     SnapshotMode::Full => {
                         buffer.insert_box(current_entity, id, comp_ptr);
                     }
