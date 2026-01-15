@@ -1,4 +1,14 @@
 # Changelog
+## [0.4.0] - 2026-01-15
+### Core Kernel Update: HarvardCommandBuffer
+- **Replaced `DeferredEntityBuilder` with `HarvardCommandBuffer`:** A new high-performance transactional kernel for ECS mutations.
+- **Why "Harvard"?** Named after the **Harvard Architecture** (physically separate instruction and data memory). This buffer maintains two distinct memory arenas:
+  - **Instruction Bus (`meta_bump`):** Stores OpCodes (`ModifyEntity`, `Despawn`) and lightweight arguments.
+  - **Data Bus (`data_bump`):** Stores raw component payloads (POD/Drop).
+- **Zero-Overhead Write Combining:** Consecutive inserts to the same entity are automatically merged in the instruction stream without extra allocations, mimicking a CPU's write-combining buffer.
+- **Dual-Bump Allocation:** Eliminates heap fragmentation by using `bumpalo` for all temporary storage, dropping the entire arena instantly after `apply()`.
+- **Safety & correctness:** Implements robust `Drop` safety to clean up unapplied C++ resources and handles duplicate component insertions by keeping the latest value (LIFO override).
+
 ## [0.3.0] - 2025-12-20
 ### Architectural Improvements (Aurora Hybrid Pipeline)
 - **Direct-to-World Binary I/O:** `binary_archive` now exposes `save_arrow_archetype_from_world` and `load_arrow_archetype_to_world`, allowing `aurora_archive` to perform high-performance binary operations directly against the Bevy World without intermediate conversions.
