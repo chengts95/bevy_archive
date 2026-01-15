@@ -57,8 +57,9 @@ impl Archive for WorldArrowSnapshot {
         let mut buffer = HarvardCommandBuffer::new();
         for archetype in &self.archetypes {
             load_arrow_archetype_with_remap(world, registry, id_registry, archetype, &mut buffer, mapper).map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(format!("{:?}", e)))?;
+            buffer.apply(world);
+            buffer.reset();
         }
-        buffer.apply(world);
         Ok(())
     }
 
@@ -251,8 +252,9 @@ impl WorldArrowSnapshot {
         let mut buffer = HarvardCommandBuffer::new();
         for archetype in &self.archetypes {
             load_arrow_archetype_to_world(world, reg, archetype, &mut buffer)?;
+            buffer.apply(world);
+            buffer.reset();
         }
-        buffer.apply(world);
         Ok(())
     }
 }

@@ -36,6 +36,7 @@ pub fn load_world_arch_snapshot_with_remap(
     id_reg: &IDRemapRegistry,
     mapper: &dyn EntityRemapper,
 ) {
+    let mut buffer = HarvardCommandBuffer::new();
     for arch in &snapshot.archetypes {
         let entities = arch.entities();
 
@@ -67,7 +68,6 @@ pub fn load_world_arch_snapshot_with_remap(
             })
             .collect();
 
-        let mut buffer = HarvardCommandBuffer::new();
         let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
         for (row, old_entity_id) in entities.iter().enumerate() {
              let current_entity = mapper.map(*old_entity_id);
@@ -107,6 +107,7 @@ pub fn load_world_arch_snapshot_with_remap(
             }
         }
         buffer.apply(world);
+        buffer.reset();
     }
 }
 
@@ -384,6 +385,7 @@ pub fn load_world_arch_snapshot_defragment(
     world.entities().reserve_entities(count_entities(snapshot));
     world.flush();
 
+    let mut buffer = HarvardCommandBuffer::new();
     for arch in &snapshot.archetypes {
         let entities = arch.entities();
 
@@ -404,7 +406,6 @@ pub fn load_world_arch_snapshot_defragment(
             })
             .collect();
 
-        let mut buffer = HarvardCommandBuffer::new();
         let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
         for (row, entity) in entities.iter().enumerate() {
             let entity = EntityRow::from_raw_u32(*entity).unwrap();
@@ -429,6 +430,7 @@ pub fn load_world_arch_snapshot_defragment(
             }
         }
         buffer.apply(world);
+        buffer.reset();
     }
 }
 

@@ -212,6 +212,42 @@ impl HarvardCommandBuffer {
         self.pending_args.clear();
         self.pending_entity = None;
     }
+
+    pub fn reset(&mut self) {
+        // Ensure any pending ops are cleared (though apply clears them).
+        // If reset is called without apply, we might drop data?
+        // Yes, reset implies "I am done with this data, discard it".
+        // BUT, if we have pending data that WASN'T applied, we should DROP it properly!
+        // The Drop implementation handles this, but here we are not dropping the struct.
+        // So we must manually run drop logic for unapplied data before resetting bumps.
+        
+        // 1. Pending args
+        for arg in &self.pending_args {
+            if let Some(drop_fn) = arg.drop_fn {
+                let ptr = unsafe { OwningPtr::new(arg.payload_ptr) };
+                unsafe { drop_fn(ptr) };
+            }
+        }
+        
+        // 2. Ops
+        for op in &self.ops {
+            if let OpHead::ModifyEntity { args_ptr, count, .. } = op {
+                let args = unsafe { std::slice::from_raw_parts(args_ptr.as_ptr(), *count as usize) };
+                for arg in args {
+                    if let Some(drop_fn) = arg.drop_fn {
+                         let ptr = unsafe { OwningPtr::new(arg.payload_ptr) };
+                         unsafe { drop_fn(ptr) };
+                    }
+                }
+            }
+        }
+
+        self.ops.clear();
+        self.pending_args.clear();
+        self.pending_entity = None;
+        self.meta_bump.reset();
+        self.data_bump.reset();
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +259,36 @@ mod tests {
 
     #[derive(Component)]
     struct B(String);
+
+    #[test]
+    fn test_reset_and_reuse() {
+        let mut world = World::new();
+        let e1 = world.spawn_empty().id();
+        let comp_id_a = world.register_component::<A>();
+        
+        let mut buffer = HarvardCommandBuffer::new();
+        
+        // Cycle 1
+        let a_val = A(10);
+        let ptr = buffer.data_bump.alloc(a_val) as *mut A;
+        let abox = unsafe { ArenaBox::new::<A>(OwningPtr::new(NonNull::new(ptr as *mut u8).unwrap())) };
+        buffer.insert(e1, comp_id_a, abox);
+        
+        buffer.apply(&mut world);
+        buffer.reset(); // Should be safe and reuse memory
+
+        // Cycle 2
+        let a_val = A(20);
+        let ptr = buffer.data_bump.alloc(a_val) as *mut A;
+        let abox = unsafe { ArenaBox::new::<A>(OwningPtr::new(NonNull::new(ptr as *mut u8).unwrap())) };
+        buffer.insert(e1, comp_id_a, abox);
+        
+        buffer.apply(&mut world);
+        
+        let a = world.entity(e1).get::<A>().unwrap();
+        assert_eq!(a.0, 20);
+    }
+
 
     #[test]
     fn test_harvard_buffer() {

@@ -7,7 +7,7 @@
   - **Data Bus (`data_bump`):** Stores raw component payloads (POD/Drop).
 - **Zero-Overhead Write Combining:** Consecutive inserts to the same entity are automatically merged in the instruction stream without extra allocations, mimicking a CPU's write-combining buffer.
 - **Dual-Bump Allocation:** Eliminates heap fragmentation by using `bumpalo` for all temporary storage, dropping the entire arena instantly after `apply()`.
-- **Safety & correctness:** Implements robust `Drop` safety to clean up unapplied C++ resources and handles duplicate component insertions by keeping the latest value (LIFO override).
+- **Safety & correctness:** Implements robust `Drop` safety to clean up unapplied resources and handles duplicate component insertions by keeping the latest value (LIFO override).
 
 ## [0.3.0] - 2025-12-20
 ### Architectural Improvements (Aurora Hybrid Pipeline)
