@@ -67,8 +67,11 @@ impl IDRemapRegistry {
             }),
         );
     }
-    
-    pub fn get_hook(&self, type_id: TypeId) -> Option<&(dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync)> {
+
+    pub fn get_hook(
+        &self,
+        type_id: TypeId,
+    ) -> Option<&(dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync)> {
         self.hooks.get(&type_id).map(|b| b.as_ref())
     }
 }
@@ -119,7 +122,8 @@ impl<'w, 'a> DeferredEntityBuilder<'w, 'a> {
     }
     pub fn insert_by_id(&mut self, id: ComponentId, ptr: ArenaBox<'a>) {
         if let Some(i) = self.ids.iter().position(|&existing| existing == id) {
-            self.ptrs[i] = ptr; // replace old value
+            let old_box = std::mem::replace(&mut self.ptrs[i], ptr);
+            old_box.manual_drop();
         } else {
             self.ids.push(id);
             self.ptrs.push(ptr);
