@@ -15,7 +15,7 @@ use crate::{
     arrow_snapshot::{ComponentTable, EntityID},
     binary_archive::common::*, // Import common types
     prelude::{
-        DeferredEntityBuilder, SnapshotMode, SnapshotRegistry, vec_snapshot_factory::SnapshotError,
+        SnapshotMode, SnapshotRegistry, vec_snapshot_factory::SnapshotError,
     },
     bevy_registry::{IDRemapRegistry, EntityRemapper},
     traits::Archive,

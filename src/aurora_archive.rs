@@ -776,7 +776,7 @@ pub fn load_world_manifest_with_loader<L: BlobLoader>(
 
     // Load data
     #[cfg(feature = "arrow_rs")]
-    let mut bump = bumpalo::Bump::new();
+    let mut buffer = crate::bevy_cmdbuffer::HarvardCommandBuffer::new();
 
     for arch in loaded_archetypes {
         match arch {
@@ -790,9 +790,11 @@ pub fn load_world_manifest_with_loader<L: BlobLoader>(
             #[cfg(feature = "arrow_rs")]
             LoadedArchetype::Arrow(table) => {
                 crate::binary_archive::load_arrow_archetype_to_world(
-                    world, &registry, &table, &mut bump,
+                    world, &registry, &table, &mut buffer,
                 )
                 .map_err(|e| e.to_string())?;
+                buffer.apply(world);
+                buffer.reset();
             }
         }
     }

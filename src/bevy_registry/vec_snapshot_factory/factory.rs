@@ -27,7 +27,7 @@ pub enum SnapshotError {
 pub type ArrExportFn = fn(&[FieldRef], &World, &[Entity]) -> Result<ArrowColumn, SnapshotError>;
 pub type ArrImportFn = fn(&ArrowColumn, &mut World, &[Entity]) -> Result<(), SnapshotError>;
 pub type ArrDynFn =
-    for<'a> fn(&ArrowColumn, &'a bumpalo::Bump, &World) -> Result<Vec<ArenaBox<'a>>, SnapshotError>;
+    for<'a> fn(&ArrowColumn, &'a bumpalo::Bump) -> Result<Vec<ArenaBox<'a>>, SnapshotError>;
 
 impl DefaultSchema for Vec<FieldRef> {}
 #[derive(Clone, Debug)]
@@ -76,7 +76,7 @@ fn dyn_ctor_full<T>() -> ArrDynFn
 where
     T: Serialize + DeserializeOwned + Component,
 {
-    let arr_dyn_ctor: ArrDynFn = |arrow, bump, _world| {
+    let arr_dyn_ctor: ArrDynFn = |arrow, bump| {
         let data = deserialize_data(arrow)?;
         let data = data
             .into_iter()
@@ -131,7 +131,7 @@ where
     T: Component + From<T1>,
     T1: Serialize + DeserializeOwned + for<'a> From<&'a T>,
 {
-    let arr_dyn_ctor: ArrDynFn = |arrow, bump, _world| {
+    let arr_dyn_ctor: ArrDynFn = |arrow, bump| {
         let data: Vec<T1> = deserialize_data(arrow)?;
         let data = data
             .into_iter()
