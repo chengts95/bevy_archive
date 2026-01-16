@@ -1,6 +1,6 @@
 [package]
 name = "bevy_archive"
-version = "0.3.0-dev"
+version = "0.3.0"
 edition = "2024"
 authors = ["cts chengts95@msn.cn"]
 description = "An experimental ECS world snapshot system built on Bevy, featuring structured archetype storage and manifest-based serialization."
@@ -33,8 +33,8 @@ serde = { version = ">=1.0", features = ["derive"] }
 serde_json = ">=1.0"
 #bimap  = { version = "0.6.3", optional = true }
 #flecs_ecs = { version = "^0.2", optional = true }
-bumpalo = "3.17.0"
-rmp-serde = "1.3.0"
+bumpalo = "^3.19.0"
+rmp-serde = "1.3.1"
 base64 = "0.22.1"
 serde_arrow = { version = "^0.13.6", optional = true,features=["arrow-56"] }
 parquet = {version = "^56.1.0", optional = true}
