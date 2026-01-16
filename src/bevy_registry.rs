@@ -1,6 +1,5 @@
 use bevy_ecs::ptr::{Aligned, OwningPtr, PtrMut};
 use bevy_ecs::{component::ComponentId, prelude::*};
-use bumpalo::Bump;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::TypeId;

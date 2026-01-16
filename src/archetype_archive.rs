@@ -366,7 +366,7 @@ pub fn load_world_arch_snapshot(
             
             for info in &arch_info {
                 let col = &arch.columns[info.col_idx];
-                let (id, mut comp_ptr) = (info.comp_id, (info.ctor)(&col[row], unsafe { &*bump_ptr }).unwrap());
+                let (id, comp_ptr) = (info.comp_id, (info.ctor)(&col[row], unsafe { &*bump_ptr }).unwrap());
                 
                 // load_world_arch_snapshot implies simple load, but we should respect mode?
                 // The old implementation just called 'import'.
@@ -411,7 +411,7 @@ pub fn load_world_arch_snapshot_defragment(
 
             for info in &arch_info {
                 let col = &arch.columns[info.col_idx];
-                let (id, mut comp_ptr) = (info.comp_id, (info.ctor)(&col[row], unsafe { &*bump_ptr }).unwrap());
+                let (id, comp_ptr) = (info.comp_id, (info.ctor)(&col[row], unsafe { &*bump_ptr }).unwrap());
                 match info.mode {
                     SnapshotMode::Full => {
                         buffer.insert_box(current_entity, id, comp_ptr);

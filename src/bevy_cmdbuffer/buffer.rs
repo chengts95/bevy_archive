@@ -214,13 +214,6 @@ impl HarvardCommandBuffer {
         let comp_id = world.component_id::<T>().expect("Component not registered");
         let components_iter = components.into_iter();
         
-        // We need to collect components into data_bump.
-        // We can't use `alloc_slice_copy` because we have an iterator (and T might not be Copy).
-        // We need to alloc a slice in bump.
-        
-        let mut count = 0;
-        let start_ptr = self.data_bump.alloc_layout(Layout::new::<T>()); // Dummy start? No.
-        
         // We need contiguous memory.
         // Bumpalo `alloc_slice_fill_iter` is what we want!
         let slice = self.data_bump.alloc_slice_fill_iter(components_iter);

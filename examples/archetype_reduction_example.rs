@@ -8,7 +8,6 @@ use bevy_archive::{
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::ptr::OwningPtr;
-use bevy_ecs::component::ComponentId;
 use std::ptr::NonNull;
 use bumpalo::Bump;
 use serde::{Deserialize, Serialize};
