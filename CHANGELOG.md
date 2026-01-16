@@ -1,5 +1,4 @@
-# Changelog
-## [0.4.0] - 2026-01-15
+# Changelog 
 ## [0.3.0] - 2025-12-20
 ### Architectural Improvements (Aurora Hybrid Pipeline)
 - **Direct-to-World Binary I/O:** `binary_archive` now exposes `save_arrow_archetype_from_world` and `load_arrow_archetype_to_world`, allowing `aurora_archive` to perform high-performance binary operations directly against the Bevy World without intermediate conversions.
