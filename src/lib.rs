@@ -12,31 +12,36 @@
 //!    This mirrors how Bevy lays out data internally and avoids the overhead of
 //!    per-entity iteration.
 //!
-//! 2. **Format agnostic via the [`Archive`] trait.** All backends implement the same
+//! 2. **Format agnostic via the [`Archive`](traits::Archive) trait.** All backends implement the same
 //!    five-method interface. Adding a new format requires only implementing
 //!    [`Archive`](traits::Archive) — no changes to the core save/load pipeline.
 //!
 //! 3. **User-controlled entity ID space during merge.** When loading a snapshot into an
 //!    existing world, [`apply_with_remap`](traits::Archive::apply_with_remap) accepts a
-//!    user-provided [`EntityRemapper`] so that the user, not the engine, decides how old
+//!    user-provided [`EntityRemapper`](bevy_registry::EntityRemapper) so that the user, not the engine, decides how old
 //!    IDs map to new ones. Bevy's entity generations are transparent to this path.
 //!
-//! 4. **Zero-allocation writes via [`HarvardCommandBuffer`].** Deserialized component
+//! 4. **Zero-allocation writes via [`HarvardCommandBuffer`](bevy_cmdbuffer::HarvardCommandBuffer).** Deserialized component
 //!    payloads are placed into a `bumpalo::Bump` arena and batched into a write-combining
 //!    command stream before being flushed to the world in a single pass.
 //!
 //! 5. **Isolation from Bevy API churn.** Volatile Bevy internals (`EntityIndex`, `Entities`,
 //!    `EntityAllocator`) are touched only in a few strategic modules. Users interact with
-//!    stable wrapper functions like [`entity_to_index`] and [`entity_from_index`].
+//!    stable wrapper functions like [`entity_to_index`](serde_utils::entity_to_index) and [`entity_from_index`](serde_utils::entity_from_index).
 //!
 //! ## Supported Formats
 //!
 //! | Format | Struct | Feature | Best For |
 //! |---|---|---|---|
 //! | MessagePack binary | [`MsgPackArchive`](binary_archive::msgpack_archive::MsgPackArchive) | *(default)* | Savegames, network transfer |
-//! | Aurora manifest (JSON/TOML + CSV) | [`AuroraWorldManifest`] | *(default)* | Modding, hand-editable assets |
-//! | JSON entity dump | [`WorldSnapshot`] | *(default)* | Debugging, introspection |
-//! | Apache Arrow / Parquet | [`WorldArrowSnapshot`](binary_archive::WorldArrowSnapshot) | `arrow_rs` | Analytics, large worlds |
+//! | Aurora manifest (JSON/TOML + CSV + Parquet) | [`AuroraWorldManifest`](aurora_archive::AuroraWorldManifest) | *(default)* | Modding, hand-editable assets, hybrid binary+text |
+//! | JSON entity dump | [`WorldSnapshot`](entity_archive::WorldSnapshot) | *(default)* | Debugging, introspection |
+//! | Apache Arrow / Parquet | `WorldArrowSnapshot` (in `binary_archive`) | `arrow_rs` | Analytics, large worlds |
+//!
+//! > **Aurora + Arrow:** When `arrow_rs` is enabled, the Aurora manifest format can embed
+//! > Parquet blobs alongside CSV/JSON. The same [`load_world_manifest`](aurora_archive::load_world_manifest)
+//! > function dispatches to the Arrow loader automatically — no separate code path needed.
+//! > See `examples/hybrid_zip.rs`.
 //!
 //! ## Quick Start
 //!
@@ -81,7 +86,7 @@
 //!
 //! // Pre-allocate slots for the incoming entities
 //! let old_ids = archive.get_entities();
-//! let mut mapper: HashMap<u32, Entity> = HashMap::new();
+//! let mut mapper = HashMap::new();
 //! for &old in &old_ids {
 //!     mapper.insert(old, target_world.spawn_empty().id());
 //! }
@@ -160,13 +165,13 @@
 //! the entity metadata or spawn entities. `EntityWorldMut` silently returns `Err`
 //! for unspawned IDs.
 //!
-//! `bevy_archive` provides [`reserve_entity_slots`] which wraps `alloc_many` +
+//! `bevy_archive` provides [`reserve_entity_slots`](bevy_registry::reserve_entity_slots) which wraps `alloc_many` +
 //! `spawn_empty_at` to make a contiguous ID range alive before loading.
 //!
 //! ### `EntityIndex` is a newtype (0.17→0.19)
 //!
-//! `Entity::index()` now returns `EntityIndex` instead of `u32`. Use
-//! `.index_u32()` for raw values, or better yet [`entity_to_index`].
+//! `Entity::index()` now returns `EntityIndex` instead of a raw u32. Use
+//! `.index_u32()` for raw values, or better yet [`entity_to_index`](serde_utils::entity_to_index).
 //!
 //! ## Module Map
 //!
