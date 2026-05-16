@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0-dev] - Unreleased
+## [0.4.0-rc.1] - Pre-release
 
 ### Bevy 0.19 Upgrade
 

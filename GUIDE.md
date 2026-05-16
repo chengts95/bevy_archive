@@ -1,6 +1,6 @@
 # AI Agent Guide to `bevy_archive`
 
-**Current Version:** 0.4.0-dev
+**Current Version:** 0.4.0-rc.1
 **Core Concept:** A high-performance, format-agnostic ECS snapshot and serialization system for Bevy.
 **Target Bevy:** 0.19.0-rc.1
 
