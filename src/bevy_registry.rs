@@ -87,6 +87,29 @@ impl EntityRemapper for HashMap<u32, Entity> {
 
 use crate::bevy_cmdbuffer::HarvardCommandBuffer;
 
+/// Emulate the old `Entities::reserve_entities(n)` from Bevy 0.17.
+///
+/// Bevy 0.19 split entity allocation into two steps:
+/// 1. `alloc_many(n)` — bumps the allocator counter so indices are claimable
+/// 2. `spawn_empty_at(entity)` — extends `Entities.meta` and makes the slot alive
+///
+/// Neither alone is sufficient. `alloc_many` doesn't spawn; `spawn_empty_at`
+/// fails if the allocator hasn't claimed the index. We need both.
+pub fn reserve_entity_slots(world: &mut World, max_index: u32) {
+    // Step 1: tell the allocator these indices exist
+    world.entity_allocator_mut().alloc_many(max_index + 1);
+    // Step 2: make every slot alive so `get_entity_mut` works later
+    for i in 0..=max_index {
+        let entity = Entity::from_raw_u32(i).unwrap_or(Entity::PLACEHOLDER);
+        if entity == Entity::PLACEHOLDER {
+            continue;
+        }
+        if world.get_entity(entity).is_err() {
+            let _ = world.spawn_empty_at(entity);
+        }
+    }
+}
+
 pub struct DeferredEntityBuilder<'w> {
     buffer: &'w mut HarvardCommandBuffer,
     entity: Entity,
@@ -275,8 +298,8 @@ impl SnapshotRegistry {
                 },
             },
 
-            comp_id: |world| world.resource_id::<T>(),
-            register: |world| world.register_resource::<T>(),
+            comp_id: |world| world.component_id::<T>(),
+            register: |world| world.register_component::<T>(),
             mode,
             #[cfg(feature = "arrow_rs")]
             arrow: None,

@@ -40,7 +40,7 @@ fn main() {
     // 2. Setup Remapping Logic (Common)
     let mut id_registry = IDRemapRegistry::default();
     id_registry.register_remap_hook::<WiringTable>(|comp, mapper| {
-        let old_idx = comp.target.index();
+        let old_idx = entity_to_index(&comp.target);
         let new_entity = mapper.map(old_idx);
         comp.target = new_entity;
     });

@@ -1,5 +1,76 @@
-# Changelog 
-## [0.3.0] - 2025-12-20
+# Changelog
+
+## [0.4.0-dev] - Unreleased
+
+### Bevy 0.19 Upgrade
+
+Bevy 0.19 introduces breaking API changes and internal architectural shifts. This release adapts `bevy_archive` to the new version.
+
+#### Bevy API Renames (0.17 → 0.19)
+
+| Old (0.17) | New (0.19) |
+|---|---|
+| `EntityRow` | `EntityIndex` |
+| `Entity::from_row(row)` | `Entity::from_index(index)` |
+| `Entities::resolve_from_id(EntityRow)` | `Entities::resolve_from_index(EntityIndex)` |
+| `Entity::index() → u32` | `Entity::index() → EntityIndex`; use `.index_u32()` for raw `u32` |
+| `World::resource_id::<T>()` | `World::component_id::<T>()` |
+| `World::register_resource::<T>()` | `World::register_component::<T>()` |
+| `Entities::reserve_entities(n)` | Removed; use `EntityAllocator::alloc_many(n)` via `world.entity_allocator_mut()` |
+
+#### Bevy 0.19 Internal Quirks & Workarounds
+
+**1. Resources are stored as entities.**
+
+In 0.19, every `Resource` is backed by a real `Entity` with an `IsResource` marker component. `World::new()` calls `bootstrap()` which spawns a `DefaultQueryFilters` resource entity (ID 0). This entity and its archetype are visible to `world.archetypes().iter()` and `iter_entities()`.
+
+*Workaround:* All snapshot save paths now filter archetypes with `!arch.contains(IS_RESOURCE)`. This prevents engine-internal resource entities from polluting user-facing snapshots.
+
+```rust
+// Applied in save_world_arch_snapshot, MsgPackArchive::from_world,
+// WorldWithAurora::from_world, WorldArrowSnapshot::from_world_reg
+archetypes.iter().filter(|x| !x.is_empty() && !x.contains(IS_RESOURCE))
+```
+
+**2. Entity allocation is decoupled from metadata.**
+
+`EntityAllocator::alloc_many(n)` only pushes the allocation counter; it does NOT extend the `Entities` metadata vec or spawn entities. Without explicit `spawn_empty_at`, `EntityWorldMut::get_entity_mut()` returns `Err` silently.
+
+*Workaround:* Added `reserve_entity_slots()` in `bevy_registry` that combines `alloc_many` + `spawn_empty_at` to make a range of entity IDs alive before loading snapshots.
+
+```rust
+/// Reserve a contiguous range of entity slots and ensure they are alive.
+pub fn reserve_entity_slots(world: &mut World, count: u32) {
+    world.entity_allocator_mut().alloc_many(count);
+    for i in 0..count {
+        let _ = world.spawn_empty_at(Entity::from_index(
+            EntityIndex::from_raw_u32(i).unwrap()
+        ));
+    }
+}
+```
+
+**3. Entity ID deserialization is brittle across versions.**
+
+Each Bevy version changes the public API surface around `Entity`/`EntityIndex`. To insulate user code and examples, we centralize conversions in `serde_utils`:
+
+```rust
+// Two canonical conversion functions — use these instead of raw Bevy API
+pub fn entity_to_index(entity: &Entity) -> u32 { entity.index_u32() }
+pub fn entity_from_index(index: u32) -> Entity { Entity::from_raw_u32(index).unwrap_or(PLACEHOLDER) }
+```
+
+#### Added
+- `entity_to_index()` / `entity_from_index()` in `serde_utils` — canonical Entity↔u32 conversions.
+- `reserve_entity_slots()` in `bevy_registry` — cross-version entity slot reservation.
+- `entity_serde_compact` / `entity_serde_full` serde modules (prepared, not yet exported).
+
+#### Changed
+- All `WorldExt::iter_entities()` call sites now use `entity_to_index()` instead of raw `.index()`.
+- All `example/*.rs` files updated to use the new conversion functions.
+- `HarvardCommandBuffer::apply()` now calls `spawn_empty_at` before inserting into entities not yet alive.
+
+### [0.3.0] - 2025-12-20
 ### Architectural Improvements (Aurora Hybrid Pipeline)
 - **Direct-to-World Binary I/O:** `binary_archive` now exposes `save_arrow_archetype_from_world` and `load_arrow_archetype_to_world`, allowing `aurora_archive` to perform high-performance binary operations directly against the Bevy World without intermediate conversions.
 - **Hybrid Manifest Generation:** `WorldWithAurora::from_guided` now acts as a coordinator. It iterates the ECS World once and dispatches archetype saving to either the Legacy path (Text/JSON via `ArchetypeSnapshot`) or the Binary path (Arrow/Parquet via `ComponentTable`), depending on the `ExportGuidance`. This avoids forcing binary data through the inefficient `serde_json::Value` intermediate representation.

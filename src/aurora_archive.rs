@@ -23,7 +23,7 @@ use crate::archetype_archive::{
 };
 #[cfg(feature = "arrow_rs")]
 use crate::arrow_snapshot::ComponentTable;
-use crate::bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper};
+use crate::bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper, reserve_entity_slots};
 use crate::csv_archive::ColumnarCsv;
 use crate::csv_archive::columnar_from_snapshot;
 use crate::traits::Archive;
@@ -359,8 +359,9 @@ impl WorldWithAurora {
             .filter_map(|&name| registry.comp_id_by_name(name, world).map(|cid| (cid, name)))
             .collect();
 
+        // Filter out internal Bevy resource archetypes (marked with IsResource).
         for (i, arch) in world.archetypes().iter().enumerate() {
-            if arch.is_empty() {
+            if arch.is_empty() || arch.contains(bevy_ecs::resource::IS_RESOURCE) {
                 continue;
             }
             if !arch
@@ -771,7 +772,7 @@ pub fn load_world_manifest_with_loader<L: BlobLoader>(
             max_entity = max;
         }
     }
-    world.entities().reserve_entities(max_entity + 1);
+    reserve_entity_slots(world, max_entity + 1);
     world.flush();
 
     // Load data

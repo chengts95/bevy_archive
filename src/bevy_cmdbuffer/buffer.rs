@@ -2,7 +2,6 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::ptr::{Aligned, OwningPtr};
 use bevy_ecs::component::ComponentId;
 use bumpalo::Bump;
-use std::alloc::Layout;
 use std::ptr::NonNull;
 use crate::prelude::ArenaBox;
 
@@ -302,9 +301,10 @@ impl HarvardCommandBuffer {
                     let ids: Vec<ComponentId> = args.iter().map(|a| a.comp_id).collect();
                     let ptrs = args.iter().map(|a| unsafe { OwningPtr::new(a.payload_ptr) });
                     
-                    if let Ok(mut entity_mut) = world.get_entity_mut(*entity) {
-                        unsafe { entity_mut.insert_by_ids(&ids, ptrs) };
-                    }
+                    // Ensure entity is spawned (alloc_many only allocates indices, meta not extended)
+                    let _ = world.spawn_empty_at(*entity);
+                    let mut entity_mut = world.entity_mut(*entity);
+                    unsafe { entity_mut.insert_by_ids(&ids, ptrs) };
                 }
                 OpHead::BatchInsert { entities_ptr, payload_ptr, count, comp_id, stride, .. } => {
                     let entities = unsafe { std::slice::from_raw_parts(entities_ptr.as_ptr(), *count as usize) };
@@ -341,10 +341,10 @@ impl HarvardCommandBuffer {
                     
                     let mut ptr = payload_ptr.as_ptr();
                     for &entity in entities {
+                        let _ = world.spawn_empty_at(entity);
                         let owning_ptr = unsafe { OwningPtr::new(NonNull::new_unchecked(ptr)) };
-                        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
-                            unsafe { entity_mut.insert_by_id(*comp_id, owning_ptr) };
-                        }
+                        let mut entity_mut = world.entity_mut(entity);
+                        unsafe { entity_mut.insert_by_id(*comp_id, owning_ptr) };
                         ptr = unsafe { ptr.add(*stride) };
                     }
                 }

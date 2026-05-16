@@ -1,7 +1,8 @@
 # AI Agent Guide to `bevy_archive`
 
-**Current Version:** 0.3.0
+**Current Version:** 0.4.0-dev
 **Core Concept:** A high-performance, format-agnostic ECS snapshot and serialization system for Bevy.
+**Target Bevy:** 0.19.0-rc.1
 
 ## 1. The `Archive` Trait (High-Level API)
 
@@ -80,7 +81,8 @@ When loading a snapshot into an existing world, Entity IDs will conflict. Use `a
 ```rust
 let mut id_registry = IDRemapRegistry::default();
 id_registry.register_remap_hook::<Parent>(|comp, mapper| {
-    comp.0 = mapper.map(comp.0.index());
+    use bevy_archive::entity_to_index;
+    comp.0 = mapper.map(entity_to_index(&comp.0));
 });
 ```
 
@@ -124,3 +126,60 @@ buffer.reset(); // Reuse memory
 - `examples/standard_api_example.rs`: Basic save/load workflow.
 - `examples/id_remap_example.rs`: Complex merging with Entity references.
 - `examples/hybrid_zip.rs`: Advanced hybrid archive (Parquet + CSV in ZIP).
+
+## 6. Entity Serialization Helpers (`serde_utils`)
+
+Bevy frequently renames `Entity`-related methods between versions. To insulate user code, `bevy_archive` provides canonical conversion functions:
+
+```rust
+use bevy_archive::prelude::*;
+
+// Entity → u32 (index only, drops generation)
+let idx: u32 = entity_to_index(&entity);
+
+// u32 → Entity (generation = 0, for deserialization)
+let entity: Entity = entity_from_index(idx);
+
+// Also available via serde attribute:
+// #[serde(with = "entity_serializer")]  ← existing, now backed by entity_to_index
+```
+
+**Always use these instead of raw `.index()` or `.index_u32()` in Wrapper `From` impls and remap hooks.** When the next Bevy version renames them again, only `serde_utils.rs` needs updating.
+
+## 7. Bevy 0.19 Compatibility Notes
+
+This section documents Bevy 0.19 behaviors that affect `bevy_archive` and the workarounds in place.
+
+### 7.1 Resources Are Entities
+
+In Bevy 0.19, every `Resource` is stored as a real `Entity` with an `IsResource` marker component. `World::new()` calls `bootstrap()`, which spawns a `DefaultQueryFilters` resource entity (ID 0). This entity and its archetype are visible to `world.archetypes().iter()`.
+
+**Impact:** If unfiltered, resource entities pollute world snapshots with engine-internal data.
+
+**Workaround:** All four save paths filter archetypes with `!arch.contains(IS_RESOURCE)`:
+- `archetype_archive::save_world_arch_snapshot`
+- `MsgPackArchive::from_world`
+- `WorldWithAurora::from_world`
+- `WorldArrowSnapshot::from_world_reg`
+
+### 7.2 Entity Allocation ≠ Entity Metadata
+
+`EntityAllocator::alloc_many(n)` only advances the internal counter. It does NOT extend the `Entities` metadata vec or spawn entities. `EntityWorldMut::get_entity_mut()` silently returns `Err` for un-spawned IDs.
+
+**Impact:** Loading snapshots without explicit spawning causes all entities to be silently skipped.
+
+**Workaround:** `reserve_entity_slots()` in `bevy_registry.rs` combines `alloc_many` + `spawn_empty_at`:
+```rust
+pub fn reserve_entity_slots(world: &mut World, count: u32) {
+    world.entity_allocator_mut().alloc_many(count);
+    for i in 0..count {
+        let _ = world.spawn_empty_at(Entity::from_index(
+            EntityIndex::from_raw_u32(i).unwrap()
+        ));
+    }
+}
+```
+
+### 7.3 EntityIndex Is a Newtype
+
+`Entity::index()` now returns `EntityIndex` (not `u32`). Use `.index_u32()` for raw values, or use `entity_to_index()` from `serde_utils` for cross-version stability.

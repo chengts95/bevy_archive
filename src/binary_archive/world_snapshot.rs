@@ -1,5 +1,5 @@
 use crate::binary_archive::arrow_column::RawTData;
-use bevy_ecs::{component::ComponentId, entity::EntityRow, prelude::*};
+use bevy_ecs::{component::ComponentId, entity::EntityIndex, prelude::*};
  
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -11,11 +11,12 @@ pub mod flecs;
 mod zip_snapshot;
 
 use crate::{
+    serde_utils::entity_to_index,
     archetype_archive::WorldExt,
     arrow_snapshot::{ComponentTable, EntityID},
     binary_archive::common::*, // Import common types
     prelude::{
-        SnapshotMode, SnapshotRegistry, vec_snapshot_factory::SnapshotError,
+        SnapshotMode, SnapshotRegistry, reserve_entity_slots, vec_snapshot_factory::SnapshotError,
     },
     bevy_registry::{IDRemapRegistry, EntityRemapper},
     traits::Archive,
@@ -186,7 +187,7 @@ pub fn save_arrow_archetype_from_world<'a>(
 
     let entities_ids: Vec<_> = entities
         .iter()
-        .map(|&id| EntityID { id: id.index() })
+        .map(|&id| EntityID { id: entity_to_index(&id) })
         .collect();
     archetype_snapshot.entities.extend(entities_ids);
 
@@ -205,9 +206,6 @@ pub fn save_arrow_archetype_from_world<'a>(
     Ok(archetype_snapshot)
 }
 
-fn count_entities(snapshot: &[u32]) -> u32 {
-    unsafe { *snapshot.iter().max().unwrap_unchecked() + 1 }
-}
 impl WorldArrowSnapshot {
     pub fn from_world(world: &World) -> Self {
         let reg = world.resource::<SnapshotRegistry>();
@@ -217,7 +215,11 @@ impl WorldArrowSnapshot {
         world: &World,
         registry: &SnapshotRegistry,
     ) -> Result<Self, SnapshotError> {
-        let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
+        // Filter out internal Bevy resource archetypes (marked with IsResource).
+        let archetypes = world
+            .archetypes()
+            .iter()
+            .filter(|x| !x.is_empty() && !x.contains(bevy_ecs::resource::IS_RESOURCE));
 
         let reg_comp_ids: HashMap<ComponentId, &str> = registry
             .type_registry
@@ -226,7 +228,7 @@ impl WorldArrowSnapshot {
             .collect();
 
         let mut world_snapshot = WorldArrowSnapshot::default();
-        world_snapshot.entities = WorldExt::iter_entities(world).map(|x| x.index()).collect();
+        world_snapshot.entities = WorldExt::iter_entities(world).map(|x| entity_to_index(&x)).collect();
 
         let snap = Self::save_archetypes(world, registry, archetypes, reg_comp_ids);
         world_snapshot.archetypes = snap.collect::<Result<_, _>>()?;
@@ -244,9 +246,7 @@ impl WorldArrowSnapshot {
         world: &mut World,
         reg: &SnapshotRegistry,
     ) -> Result<(), SnapshotError> {
-        world
-            .entities()
-            .reserve_entities(count_entities(&self.entities));
+        reserve_entity_slots(world, *self.entities.iter().max().unwrap_or(&0) + 1);
         world.flush();
         Self::load_world_resource(&self.resources, world, reg)?;
         let mut buffer = HarvardCommandBuffer::new();
@@ -291,7 +291,7 @@ pub fn load_arrow_archetype_to_world(
     for id in archetype.entities.iter().rev() {
         let entity = world
             .entities()
-            .resolve_from_id(EntityRow::from_raw_u32(id.id as u32).unwrap())
+            .resolve_from_index(EntityIndex::from_raw_u32(id.id).unwrap())
             .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
         
         for (mode, raw) in &mut columns {

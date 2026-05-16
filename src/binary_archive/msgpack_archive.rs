@@ -74,7 +74,7 @@ impl MsgPackArchive {
         snapshot.format = BinFormat::MsgPack;
 
         // 1. Entities
-        let entities: Vec<u32> = WorldExt::iter_entities(world).map(|e| e.index()).collect();
+        let entities: Vec<u32> = WorldExt::iter_entities(world).map(|e| e.index_u32()).collect();
         snapshot.entities = SparseU32List::from_unsorted(entities);
 
         // 2. Archetypes
@@ -84,7 +84,12 @@ impl MsgPackArchive {
             .filter_map(|&name| reg.comp_id_by_name(name, world).map(|cid| (cid, name)))
             .collect();
 
-        let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
+        // Filter out internal Bevy resource archetypes (marked with IsResource).
+        // In Bevy 0.19+, resources are stored as entities; skip their archetypes.
+        let archetypes = world
+            .archetypes()
+            .iter()
+            .filter(|x| !x.is_empty() && !x.contains(bevy_ecs::resource::IS_RESOURCE));
 
         for arch in archetypes {
             let arch_snap = save_single_archetype_snapshot(world, arch, reg, &reg_comp_ids);

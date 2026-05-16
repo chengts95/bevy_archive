@@ -1,15 +1,16 @@
 use bevy_ecs::{
     component::{ComponentId, StorageType},
-    entity::EntityRow,
+    entity::EntityIndex,
     prelude::*,
     ptr::PtrMut,
+    resource::IS_RESOURCE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, vec};
 
 use crate::{
-    bevy_registry::{IDRemapRegistry, EntityRemapper, SnapshotMode, SnapshotRegistry},
+    bevy_registry::{IDRemapRegistry, EntityRemapper, SnapshotMode, SnapshotRegistry, reserve_entity_slots},
     bevy_cmdbuffer::HarvardCommandBuffer,
     prelude::codec::DynBuilderFn,
 };
@@ -298,10 +299,10 @@ pub fn save_single_archetype_snapshot(
         return ArchetypeSnapshot::default();
     }
     let mut archetype_snapshot = ArchetypeSnapshot::default();
-    let entities: Vec<_> = archetype
+    let entities: Vec<u32> = archetype
         .entities()
         .iter()
-        .map(|x| x.id().index())
+        .map(|x| x.id().index_u32())
         .collect();
     archetype_snapshot.entities.extend(entities.as_slice());
     let iter = entities;
@@ -316,8 +317,7 @@ pub fn save_single_archetype_snapshot(
             archetype_snapshot.add_type(type_name, t);
             let col = archetype_snapshot.get_column_mut(type_name).unwrap();
             for (idx, &entity) in iter.iter().enumerate() {
-                let entity = EntityRow::from_raw_u32(entity as u32).unwrap();
-                let entity = world.entities().resolve_from_id(entity).unwrap();
+                let entity = world.entities().resolve_from_index(EntityIndex::from_raw_u32(entity).unwrap());
                 let serialized = f(world, entity).unwrap();
                 col[idx] = serialized;
             }
@@ -329,9 +329,15 @@ pub fn save_single_archetype_snapshot(
 
 pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldArchSnapshot {
     let mut world_snapshot = WorldArchSnapshot::default();
-    world_snapshot.entities = WorldExt::iter_entities(world).map(|e| e.index()).collect();
+    world_snapshot.entities = WorldExt::iter_entities(world).map(|e| e.index_u32()).collect();
     world_snapshot.entities.sort_unstable();
-    let archetypes = world.archetypes().iter().filter(|x| !x.is_empty());
+    // Filter out internal Bevy archetypes (e.g. resource entities marked with IsResource).
+    // In Bevy 0.19+, resources are stored as entities; their archetypes must be excluded
+    // to avoid polluting the snapshot with engine-internal data.
+    let archetypes = world
+        .archetypes()
+        .iter()
+        .filter(|x| !x.is_empty() && !x.contains(IS_RESOURCE));
     let reg_comp_ids: HashMap<ComponentId, &str> = reg
         .type_registry
         .keys()
@@ -342,17 +348,25 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
         .map(|archetype| save_single_archetype_snapshot(world, archetype, reg, &reg_comp_ids));
     world_snapshot.archetypes.extend(snap);
 
+    // Purge entity IDs that don't appear in any stored archetype
+    // (safety net for any unforeseen engine-internal entities)
+    world_snapshot.purge_null();
+    // Strip empty archetype snapshots from unregistered internal archetypes
+    world_snapshot.archetypes.retain(|a| !a.is_empty());
+
     world_snapshot
 }
+
 fn count_entities(snapshot: &WorldArchSnapshot) -> u32 {
     snapshot.entities.last().map(|x| *x).unwrap_or(0) + 1
 }
+
 pub fn load_world_arch_snapshot(
     world: &mut World,
     snapshot: &WorldArchSnapshot,
     reg: &SnapshotRegistry,
 ) {
-    world.entities().reserve_entities(count_entities(snapshot));
+    reserve_entity_slots(world, count_entities(snapshot));
     world.flush();
 
     let mut buffer = HarvardCommandBuffer::new();
@@ -362,7 +376,7 @@ pub fn load_world_arch_snapshot(
         let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
 
         for (row, entity_id) in entities.iter().enumerate() {
-            let entity = Entity::from_row(EntityRow::from_raw_u32(*entity_id).unwrap());
+            let entity = Entity::from_index(EntityIndex::from_raw_u32(*entity_id).unwrap());
             
             for info in &arch_info {
                 let col = &arch.columns[info.col_idx];
@@ -396,7 +410,7 @@ pub fn load_world_arch_snapshot_defragment(
     snapshot: &WorldArchSnapshot,
     reg: &SnapshotRegistry,
 ) {
-    world.entities().reserve_entities(count_entities(snapshot));
+    reserve_entity_slots(world, count_entities(snapshot));
     world.flush();
 
     let mut buffer = HarvardCommandBuffer::new();
@@ -406,8 +420,7 @@ pub fn load_world_arch_snapshot_defragment(
         let bump_ptr = buffer.data_bump() as *const bumpalo::Bump;
         
         for (row, entity) in entities.iter().enumerate() {
-            let entity = EntityRow::from_raw_u32(*entity).unwrap();
-            let current_entity = world.entities().resolve_from_id(entity).unwrap();
+            let current_entity = world.entities().resolve_from_index(EntityIndex::from_raw_u32(*entity).unwrap());
 
             for info in &arch_info {
                 let col = &arch.columns[info.col_idx];
@@ -603,13 +616,6 @@ mod tests {
         let (world, registry) = init_world();
         let snapshot = save_world_arch_snapshot(&world, &registry);
         assert_eq!(snapshot.entities.len(), 10 * 5);
-
-        // 输出结果片段看看效果吧
-        for (idx, arch) in snapshot.archetypes.iter().enumerate() {
-            println!("Archetype {}:", idx);
-            println!(" - Components: {:?}", arch.component_types);
-            println!(" - Entity Count: {}", arch.entities.len());
-        }
 
         // 顺便验证结构一致性
         for arch in &snapshot.archetypes {

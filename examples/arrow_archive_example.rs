@@ -70,12 +70,12 @@ impl From<Vector2Wrapper> for Vector2 {
 }
 impl From<&ChildOf> for ChildOfWrapper {
     fn from(c: &ChildOf) -> Self {
-        ChildOfWrapper(c.0.index())
+        ChildOfWrapper(entity_to_index(&c.0))
     }
 }
 impl From<ChildOfWrapper> for ChildOf {
     fn from(value: ChildOfWrapper) -> Self {
-        ChildOf(Entity::from_raw_u32(value.0).unwrap())
+        ChildOf(entity_from_index(value.0))
     }
 }
 impl From<&Tag> for TagWrapper {

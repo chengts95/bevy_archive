@@ -32,7 +32,7 @@ impl WorldSnapshot {
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
-use crate::{archetype_archive::WorldExt, bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper}, traits::Archive};
+use crate::{archetype_archive::WorldExt, bevy_registry::{SnapshotRegistry, IDRemapRegistry, EntityRemapper, reserve_entity_slots}, traits::Archive};
 use bevy_ecs::prelude::*;
 
 /// JSON → TOML
@@ -116,7 +116,7 @@ pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapsh
     let mut entities_snapshot = Vec::new();
     for e in WorldExt::iter_entities(world) {
         let mut es = EntitySnapshot::default();
-        es.id = e.index() as u64;
+        es.id = e.index_u32() as u64;
         for key in reg.type_registry.keys() {
             if let Some(func) = reg.get_factory(key).map(|x| x.js_value.export) {
                 if let Some(value) = func(world, e) {
@@ -130,7 +130,12 @@ pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapsh
         entities_snapshot.push(es);
     }
     WorldSnapshot {
-        entities: entities_snapshot,
+        // Filter out entities that have no registered components
+        // (Bevy 0.19+ may have internal entities with no registered data)
+        entities: entities_snapshot
+            .into_iter()
+            .filter(|e| !e.components.is_empty())
+            .collect(),
     }
 }
 
@@ -139,7 +144,7 @@ pub fn load_world_snapshot(world: &mut World, snapshot: &WorldSnapshot, reg: &Sn
     for e in &snapshot.entities {
         max_id = max_id.max(e.id);
     }
-    world.entities().reserve_entities((max_id + 1) as u32);
+    reserve_entity_slots(world, (max_id + 1) as u32);
     world.flush();
     for e in &snapshot.entities {
         let entity = Entity::from_raw_u32(e.id as u32).unwrap();
@@ -244,11 +249,10 @@ mod tests {
         registry.register::<Admittance>();
         registry.register::<Resistor>();
         registry.register::<Port2>();
-        let a: Vec<_> = world.entities().reserve_entities(10).collect();
-        world.flush();
-        a.into_iter().enumerate().for_each(|(i, x)| {
+        let a: Vec<_> = (0..10).map(|_| world.spawn_empty().id()).collect();
+        a.iter().enumerate().for_each(|(i, x)| {
             world
-                .entity_mut(x)
+                .entity_mut(*x)
                 .insert((Resistor(1.0), Port2([0, i as i32]), Admittance(1.0)));
         });
 
