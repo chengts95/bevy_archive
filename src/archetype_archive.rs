@@ -655,6 +655,82 @@ mod tests {
     }
 
     #[test]
+    fn test_generation_immunity_non_remap() {
+        // Prove that entity generation (the upper 32 bits) is irrelevant for bevy_archive.
+        // We only serialize EntityIndex (u32), not generation.
+        // On load into a clean world, all entities get generation=0 and work fine.
+        let (world_a, registry) = init_world();
+
+        let snap = save_world_arch_snapshot(&world_a, &registry);
+        assert!(!snap.entities.is_empty(), "Snapshot must contain entities");
+
+        // Load into a fresh, clean world
+        let mut world_b = World::new();
+        load_world_arch_snapshot_defragment(&mut world_b, &snap, &registry);
+
+        // Verify: roundtrip must produce identical snapshot
+        let snap_b = save_world_arch_snapshot(&world_b, &registry);
+        assert_eq!(
+            snap.entities.len(),
+            snap_b.entities.len(),
+            "Entity count preserved across load into clean world"
+        );
+        assert_eq!(
+            serde_json::to_string_pretty(&snap).unwrap(),
+            serde_json::to_string_pretty(&snap_b).unwrap(),
+            "Roundtrip stable: entity generation does not affect bevy_archive"
+        );
+    }
+
+    #[test]
+    fn test_generation_immunity_remap() {
+        // Prove that in remap mode, the user controls the ID space entirely.
+        // The mapper returns whatever Entity the user created — bevy_archive
+        // never touches or depends on entity generations.
+        use std::collections::HashMap;
+
+        let (world_a, registry) = init_world();
+        let snap = save_world_arch_snapshot(&world_a, &registry);
+        let old_ids: Vec<u32> = snap.entities.clone();
+
+        // Build a clean world and pre-spawn entities for the remapped IDs.
+        // Offset all IDs by 1000 to guarantee no overlap with source IDs.
+        let mut world_b = World::new();
+        let mut mapper: HashMap<u32, Entity> = HashMap::new();
+        let offset = 999;
+        // Pre-allocate slots then map the last 50 to old_ids
+        for i in 0..(offset + 50) {
+            let e = world_b.spawn_empty().id();
+            if i >= offset {
+                let old = old_ids[i - offset];
+                mapper.insert(old, e);
+            }
+        }
+
+        let id_registry = IDRemapRegistry::default();
+        load_world_arch_snapshot_with_remap(&mut world_b, &snap, &registry, &id_registry, &mapper);
+
+        // Verify entities exist at remapped IDs
+        // TestComponentA appears in 3 of 5 archetypes = 30 out of 50 entities
+        let loaded_a_ids: Vec<u32> = world_b
+            .query::<(Entity, &TestComponentA)>()
+            .iter(&world_b)
+            .map(|(e, _)| e.index_u32())
+            .collect();
+        assert_eq!(loaded_a_ids.len(), 10 * 3, "TestComponentA entities loaded at remapped IDs");
+        assert!(
+            loaded_a_ids.iter().all(|&id| id >= 1000),
+            "Loaded entity IDs should all be in the remapped range (1000+)"
+        );
+
+        // Verify total loaded entity count
+        let total_loaded = WorldExt::iter_entities(&world_b)
+            .filter(|e| e.index_u32() >= 1000)
+            .count();
+        assert_eq!(total_loaded, 10 * 5, "All 50 entities loaded at remapped IDs");
+    }
+
+    #[test]
     fn test_convert_to_entity_snapshot() {
         let (world, registry) = init_world();
         let snapshot = save_world_arch_snapshot(&world, &registry);

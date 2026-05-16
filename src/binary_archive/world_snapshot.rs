@@ -291,8 +291,7 @@ pub fn load_arrow_archetype_to_world(
     for id in archetype.entities.iter().rev() {
         let entity = world
             .entities()
-            .resolve_from_index(EntityIndex::from_raw_u32(id.id).unwrap())
-            .ok_or_else(|| SnapshotError::Generic(format!("missing entity {}", id.id)))?;
+            .resolve_from_index(EntityIndex::from_raw_u32(id.id).unwrap());
         
         for (mode, raw) in &mut columns {
             let ptr = raw.data.pop().unwrap();
