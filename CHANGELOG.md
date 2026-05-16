@@ -69,6 +69,7 @@ pub fn entity_from_index(index: u32) -> Entity { Entity::from_raw_u32(index).unw
 - All `WorldExt::iter_entities()` call sites now use `entity_to_index()` instead of raw `.index()`.
 - All `example/*.rs` files updated to use the new conversion functions.
 - `HarvardCommandBuffer::apply()` now calls `spawn_empty_at` before inserting into entities not yet alive.
+- `serde_arrow` bumped from `0.13.6` to `0.14.1`; `arrow` and `parquet` locked at `58.3.0` with `arrow-58` feature.
 
 ### [0.3.0] - 2025-12-20
 ### Architectural Improvements (Aurora Hybrid Pipeline)
