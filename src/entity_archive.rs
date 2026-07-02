@@ -117,7 +117,7 @@ pub fn save_world_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldSnapsh
     for e in WorldExt::iter_entities(world) {
         let mut es = EntitySnapshot::default();
         es.id = e.index_u32() as u64;
-        for key in reg.type_registry.keys() {
+        for key in reg.entries.keys() {
             if let Some(func) = reg.get_factory(key).map(|x| x.js_value.export) {
                 if let Some(value) = func(world, e) {
                     es.components.push(ComponentSnapshot {
@@ -180,19 +180,13 @@ pub fn load_world_snapshot_with_remap(
                 }
 
                 // Apply Hook
-                if let Some(type_id) = reg.type_registry.get(type_name) {
-                     if let Some(hook) = id_registry.get_hook(*type_id) {
-                         if let Some(comp_id) = reg.comp_id_by_name(type_name, world) {
-                              // We need to get PtrMut to the component in the world.
-                              // SAFETY: We just inserted it, so it should exist.
-                              // Using world.get_mut_by_id gives us MutUntyped which can be converted to PtrMut?
-                              // world.get_mut_by_id returns Option<MutUntyped>. MutUntyped.into_inner() -> PtrMut.
-                              if let Some(mut mut_untyped) = world.get_mut_by_id(entity, comp_id) {
-                                  let ptr = mut_untyped.as_mut(); // This gives PtrMut
-                                  hook(ptr, mapper);
-                              }
-                         }
-                     }
+                if let Some(hook) = id_registry.get_hook(type_name) {
+                    if let Some(comp_id) = reg.comp_id_by_name(type_name, world) {
+                        if let Some(mut mut_untyped) = world.get_mut_by_id(entity, comp_id) {
+                            let ptr = mut_untyped.as_mut(); // This gives PtrMut
+                            hook(ptr, mapper);
+                        }
+                    }
                 }
             }
         }

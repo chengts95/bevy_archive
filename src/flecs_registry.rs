@@ -3,7 +3,7 @@ use crate::flecs_registry::snapshot_factory::SnapshotMode;
 use flecs_ecs::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::any::TypeId;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 pub mod snapshot_factory;
 
@@ -19,15 +19,11 @@ pub trait SnapshotMerge {
 }
 #[derive(Clone, Default, Debug)]
 pub struct SnapshotRegistry {
-    pub type_registry: HashMap<&'static str, TypeId>,
     pub entries: HashMap<&'static str, SnapshotFactory>,
     pub resource_entries: HashMap<&'static str, SnapshotFactory>,
 }
 impl SnapshotMerge for SnapshotRegistry {
     fn merge_only_new(&mut self, other: &Self) {
-        for (name, type_id) in &other.type_registry {
-            self.type_registry.entry(*name).or_insert(*type_id);
-        }
         for (name, factory) in &other.entries {
             self.entries.entry(*name).or_insert_with(|| factory.clone());
         }
@@ -39,9 +35,6 @@ impl SnapshotMerge for SnapshotRegistry {
     }
 
     fn merge(&mut self, other: &Self) {
-        for (name, type_id) in &other.type_registry {
-            self.type_registry.insert(*name, *type_id);
-        }
         for (name, factory) in &other.entries {
             self.entries.insert(*name, factory.clone());
         }
@@ -57,7 +50,6 @@ impl SnapshotRegistry {
         T: Serialize + DeserializeOwned + ComponentId + DataComponent + 'static,
     {
         let name = short_type_name::<T>();
-        self.type_registry.insert(name, TypeId::of::<T>());
         self.entries
             .insert(name, SnapshotFactory::new::<T>(SnapshotMode::Full));
     }
@@ -95,7 +87,6 @@ impl SnapshotRegistry {
         T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
     {
         let name = short_type_name::<T>();
-        self.type_registry.insert(name, TypeId::of::<T>());
         self.entries.insert(
             name,
             SnapshotFactory::new_with_wrapper::<T, T1>(SnapshotMode::Full),
@@ -106,7 +97,6 @@ impl SnapshotRegistry {
         T: Serialize + DeserializeOwned + ComponentId + DataComponent + Default + 'static,
     {
         let name = short_type_name::<T>();
-        self.type_registry.insert(name, TypeId::of::<T>());
         self.entries.insert(name, SnapshotFactory::new::<T>(mode));
     }
 

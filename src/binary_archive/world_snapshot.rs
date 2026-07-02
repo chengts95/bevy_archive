@@ -222,7 +222,7 @@ impl WorldArrowSnapshot {
             .filter(|x| !x.is_empty() && !x.contains(bevy_ecs::resource::IS_RESOURCE));
 
         let reg_comp_ids: HashMap<ComponentId, &str> = registry
-            .type_registry
+            .entries
             .keys()
             .filter_map(|&name| registry.comp_id_by_name(name, world).map(|cid| (cid, name)))
             .collect();
@@ -334,8 +334,7 @@ pub fn load_arrow_archetype_with_remap(
                     .unwrap();
                 let mode = factory.mode;
                 let data = (arrow.arr_dyn)(data, unsafe { &*bump_ptr })?;
-                let type_id = reg.type_registry.get(type_name.as_str()).cloned();
-                let hook = type_id.and_then(|tid| id_reg.get_hook(tid));
+                let hook = id_reg.get_hook(type_name.as_str());
                 
                 let raw_vec = RawTData { comp_id, data };
                 columns.push((mode, raw_vec, hook));

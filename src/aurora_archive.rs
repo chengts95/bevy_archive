@@ -354,7 +354,7 @@ impl WorldWithAurora {
         let mut external_payloads: HashMap<String, Vec<u8>> = HashMap::new();
 
         let reg_comp_ids: HashMap<ComponentId, &str> = registry
-            .type_registry
+            .entries
             .keys()
             .filter_map(|&name| registry.comp_id_by_name(name, world).map(|cid| (cid, name)))
             .collect();
