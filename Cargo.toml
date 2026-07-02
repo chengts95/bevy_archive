@@ -26,7 +26,7 @@ flecs = []
 arrow_rs = ["dep:serde_arrow","dep:arrow","dep:parquet","dep:bytes","dep:zip" ,"dep:bytemuck"]
 
 [dependencies]
-bevy_ecs = {version = "0.19.0", default-features=false ,features=[ ]}
+bevy_ecs = {version = "^0.19.0", default-features=false ,features=[ ]}
 csv = "^1.4.0"
 toml = "^1.1.2"
 serde = { version = ">=1.0", features = ["derive"] }
