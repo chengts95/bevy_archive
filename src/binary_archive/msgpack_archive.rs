@@ -79,7 +79,7 @@ impl MsgPackArchive {
 
         // 2. Archetypes
         let reg_comp_ids: HashMap<bevy_ecs::component::ComponentId, &str> = reg
-            .type_registry
+            .entries
             .keys()
             .filter_map(|&name| reg.comp_id_by_name(name, world).map(|cid| (cid, name)))
             .collect();

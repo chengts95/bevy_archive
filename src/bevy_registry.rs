@@ -2,7 +2,6 @@ use bevy_ecs::ptr::{Aligned, OwningPtr, PtrMut};
 use bevy_ecs::{component::ComponentId, prelude::*};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::any::TypeId;
 use std::collections::HashMap;
 use std::ptr::NonNull;
 mod snapshot_factory;
@@ -41,7 +40,7 @@ impl<'a> ArenaBox<'a> {
 }
 
 pub struct IDRemapRegistry {
-    pub hooks: HashMap<TypeId, Box<dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync>>,
+    pub hooks: HashMap<&'static str, Box<dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync>>,
 }
 
 impl Default for IDRemapRegistry {
@@ -58,7 +57,7 @@ impl IDRemapRegistry {
         hook: impl Fn(&mut T, &dyn EntityRemapper) + 'static + Send + Sync,
     ) {
         self.hooks.insert(
-            TypeId::of::<T>(),
+            short_type_name::<T>(),
             Box::new(move |ptr, mapper| {
                 // ptr is PtrMut
                 let val = unsafe { ptr.deref_mut::<T>() };
@@ -69,9 +68,9 @@ impl IDRemapRegistry {
 
     pub fn get_hook(
         &self,
-        type_id: TypeId,
+        type_name: &str,
     ) -> Option<&(dyn Fn(PtrMut, &dyn EntityRemapper) + Send + Sync)> {
-        self.hooks.get(&type_id).map(|b| b.as_ref())
+        self.hooks.get(type_name).map(|b| b.as_ref())
     }
 }
 
@@ -151,15 +150,11 @@ pub trait SnapshotMerge {
 }
 #[derive(Resource, Clone, Default, Debug)]
 pub struct SnapshotRegistry {
-    pub type_registry: HashMap<&'static str, TypeId>,
     pub entries: HashMap<&'static str, SnapshotFactory>,
     pub resource_entries: HashMap<&'static str, SnapshotFactory>,
 }
 impl SnapshotMerge for SnapshotRegistry {
     fn merge_only_new(&mut self, other: &Self) {
-        for (name, type_id) in &other.type_registry {
-            self.type_registry.entry(*name).or_insert(*type_id);
-        }
         for (name, factory) in &other.entries {
             self.entries.entry(*name).or_insert_with(|| factory.clone());
         }
@@ -171,9 +166,6 @@ impl SnapshotMerge for SnapshotRegistry {
     }
 
     fn merge(&mut self, other: &Self) {
-        for (name, type_id) in &other.type_registry {
-            self.type_registry.insert(*name, *type_id);
-        }
         for (name, factory) in &other.entries {
             self.entries.insert(*name, factory.clone());
         }
@@ -189,7 +181,6 @@ impl SnapshotRegistry {
         T: Serialize + DeserializeOwned + Component + 'static,
     {
         let name = short_type_name::<T>();
-        self.type_registry.insert(name, TypeId::of::<T>());
         self.entries
             .insert(name, SnapshotFactory::new::<T>(SnapshotMode::Full));
     }
@@ -198,7 +189,7 @@ impl SnapshotRegistry {
         T: Component + From<T1>,
         T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T>,
     {
-        self.type_registry.insert(name, TypeId::of::<T>());
+
         self.entries.insert(
             name,
             SnapshotFactory::new_with_wrapper::<T, T1>(SnapshotMode::Full),
@@ -209,7 +200,7 @@ impl SnapshotRegistry {
         T: Component + From<T1>,
         T1: Serialize + DeserializeOwned + Default + for<'a> From<&'a T> + Into<T>,
     {
-        self.type_registry.insert(name, TypeId::of::<T>());
+
         self.entries
             .insert(name, SnapshotFactory::new_with_wrapper::<T, T1>(mode));
     }
@@ -217,7 +208,7 @@ impl SnapshotRegistry {
     where
         T: Component + Serialize + DeserializeOwned,
     {
-        self.type_registry.insert(name, TypeId::of::<T>());
+
         self.entries
             .insert(name, SnapshotFactory::new::<T>(SnapshotMode::Full));
     }
@@ -227,7 +218,6 @@ impl SnapshotRegistry {
         T1: Serialize + DeserializeOwned + for<'a> From<&'a T> + Into<T>,
     {
         let name = short_type_name::<T>();
-        self.type_registry.insert(name, TypeId::of::<T>());
         self.entries.insert(
             name,
             SnapshotFactory::new_with_wrapper::<T, T1>(SnapshotMode::Full),
@@ -238,7 +228,6 @@ impl SnapshotRegistry {
         T: Serialize + DeserializeOwned + Component + Default + 'static,
     {
         let name = short_type_name::<T>();
-        self.type_registry.insert(name, TypeId::of::<T>());
         self.entries.insert(name, SnapshotFactory::new::<T>(mode));
     }
 

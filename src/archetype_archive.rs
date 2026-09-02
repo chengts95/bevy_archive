@@ -54,10 +54,9 @@ fn prepare_loader_info<'a>(
                 .or_else(|| Some(reg.reg_by_name(type_name, world)))?; 
             
             let mode = factory.mode;
-            let type_id = reg.type_registry.get(type_name.as_str()).cloned();
             let ctor = factory.js_value.dyn_ctor;
             
-            let hook = id_reg.and_then(|r| type_id.and_then(|tid| r.get_hook(tid)));
+            let hook = id_reg.and_then(|r| r.get_hook(type_name.as_str()));
 
             Some(ComponentLoaderInfo {
                 col_idx,
@@ -339,7 +338,7 @@ pub fn save_world_arch_snapshot(world: &World, reg: &SnapshotRegistry) -> WorldA
         .iter()
         .filter(|x| !x.is_empty() && !x.contains(IS_RESOURCE));
     let reg_comp_ids: HashMap<ComponentId, &str> = reg
-        .type_registry
+        .entries
         .keys()
         .filter_map(|&name| reg.comp_id_by_name(name, &world).map(|cid| (cid, name)))
         .collect();
