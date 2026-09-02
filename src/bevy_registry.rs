@@ -57,7 +57,21 @@ impl IDRemapRegistry {
         hook: impl Fn(&mut T, &dyn EntityRemapper) + 'static + Send + Sync,
     ) {
         self.hooks.insert(
-            short_type_name::<T>(),
+             std::any::type_name::<T>(),
+            Box::new(move |ptr, mapper| {
+                // ptr is PtrMut
+                let val = unsafe { ptr.deref_mut::<T>() };
+                hook(val, mapper);
+            }),
+        ); 
+    }
+    pub fn register_remap_hook_named<T: Component>(
+        &mut self,
+        hook: impl Fn(&mut T, &dyn EntityRemapper) + 'static + Send + Sync,
+        name: &'static str
+    ) {
+        self.hooks.insert(
+            name,
             Box::new(move |ptr, mapper| {
                 // ptr is PtrMut
                 let val = unsafe { ptr.deref_mut::<T>() };
