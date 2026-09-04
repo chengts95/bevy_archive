@@ -363,6 +363,8 @@ impl HarvardCommandBuffer {
         self.ops.clear();
         self.pending_args.clear();
         self.pending_entity = None;
+        self.meta_bump.reset();
+        self.data_bump.reset();
     }
 
     pub fn reset(&mut self) {
