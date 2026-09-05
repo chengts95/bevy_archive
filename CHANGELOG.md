@@ -1,6 +1,10 @@
 # Changelog
+## [0.5.1] - release
 
-## [0.4.0-rc.1] - Pre-release
+- Fix potential typeid look up issues in remap when cross dlls. 
+- Fix cmd buffer bump allocator reset.
+
+## [0.4.0] - release
 
 ### Bevy 0.19 Upgrade
 
